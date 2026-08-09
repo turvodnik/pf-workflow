@@ -2,6 +2,15 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.1.0 — 2026-08-10
+
+Public release.
+
+- Repository made public under the MIT license; Pifagor Studio signature, noreply commit identity (history rewritten accordingly).
+- Standalone operation verified: every HANDOFF mention in the skills is now explicitly optional ("if the pf-handoff companion is installed") — pf-workflow works on its own or together with pf-handoff.
+- docs/rules-sections.en.md — English translation of the rule sections; the generated Russian version now notes that §0–§6/§13 references belong to the author's full rule set.
+- README footers with authorship and license.
+
 ## v1.0.0 — 2026-08-09
 
 Initial release of the distribution.

@@ -61,4 +61,8 @@ bash install.sh          # симлинки скиллов в ~/.claude|.codex|.
 
 Канон живёт в рабочей среде автора (`_tools/skill-library`); сюда изменения приходят релизами: `bash sync-from-tools.sh` → `CHANGELOG.md` → commit → tag `vX.Y.Z` → push. Доработки ведутся в ветке `dev`, в `main` — только отрелизенные состояния. Родственный отдельный дистрибутив подсистемы контекста: [pf-handoff](https://github.com/turvodnik/pf-handoff).
 
-Язык скиллов и правил — русский (язык рабочей среды автора); сам процесс от языка не зависит.
+Язык скиллов и правил — русский (язык рабочей среды автора); сам процесс от языка не зависит. Английский перевод правил: [docs/rules-sections.en.md](docs/rules-sections.en.md).
+
+---
+
+**Pifagor Studio** — Владимир ([@turvodnik](https://github.com/turvodnik)) · Лицензия [MIT](LICENSE)

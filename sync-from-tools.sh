@@ -26,8 +26,8 @@ mkdir -p "$HERE/docs"
 {
   echo "# Готовые разделы правил для вашего AGENTS.md / CLAUDE.md"
   echo
-  echo "Сгенерировано sync-from-tools.sh из канонического _tools/AGENTS.md (§7–§12)."
-  echo "Раздел §13 (бюджет контекста и непрерывность сессий) поставляется с инструментом-компаньоном pf-handoff."
+  echo "Сгенерировано sync-from-tools.sh из канонического _tools/AGENTS.md (§7–§12). English translation: rules-sections.en.md (обновляется вручную при релизе)."
+  echo "Ссылки в текстах на §0–§6 (политика секретов и др.) — разделы полного свода правил автора: замените своими. §13 (бюджет контекста) поставляется с инструментом-компаньоном pf-handoff."
   echo
   awk '/^## 7\. /{f=1} /^## 13\. /{f=0} f' "$TOOLS/AGENTS.md"
 } > "$HERE/docs/rules-sections.ru.md"

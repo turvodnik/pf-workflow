@@ -61,4 +61,8 @@ bash install.sh          # symlinks skills into ~/.claude|.codex|.gemini/skills 
 
 The canon lives in the author's working environment (`_tools/skill-library`); changes arrive here as releases: `bash sync-from-tools.sh` → `CHANGELOG.md` → commit → tag `vX.Y.Z` → push. Ongoing work happens on the `dev` branch; `main` holds released states only. Companion standalone distribution of the context subsystem: [pf-handoff](https://github.com/turvodnik/pf-handoff).
 
-Skill and rule texts are in Russian (the author's working language); the process design itself is language-agnostic.
+Skill and rule texts are in Russian (the author's working language); the process design itself is language-agnostic. English translation of the rules: [docs/rules-sections.en.md](docs/rules-sections.en.md).
+
+---
+
+**Pifagor Studio** — Vladimir ([@turvodnik](https://github.com/turvodnik)) · [MIT License](LICENSE)
