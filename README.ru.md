@@ -1,5 +1,7 @@
 # pf-workflow — конвейер рабочих процессов для мульти-агентной разработки
 
+[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Релиз](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases)
+
 English overview: [README.md](README.md)
 
 Один инструмент из правил, 7 скиллов, 3 агентов и хуков, который превращает работу с CLI-агентами (Claude Code, Codex, Gemini) из «одного бесконечного чата» в управляемый процесс:

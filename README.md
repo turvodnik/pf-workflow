@@ -1,5 +1,7 @@
 # pf-workflow — a spec-driven workflow toolkit for multi-agent CLI development
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases)
+
 Русская версия: [README.ru.md](README.ru.md)
 
 Rules, 7 skills, 3 agents and a set of hooks that turn work with CLI agents (Claude Code, Codex, Gemini) from "one endless chat" into a managed process:
