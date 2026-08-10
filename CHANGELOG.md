@@ -2,6 +2,10 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.4.0 — 2026-08-10
+
+- **pf-auto gating is now risk-based** (`gate = auto`): a gate after every batch when batches build on each other or touch executable artifacts (code, configs, data schemas, scripts, infrastructure); a single gate per milestone when batches are independent and cheap to fix (texts, docs, standalone pages). Three gates stay mandatory in any mode: before a batch that depends on a group's results, before any external action, and the final whole-task review. The chosen mode and its reason are recorded in the run registry, so a retro can tell whether the call was right.
+
 ## v1.3.0 — 2026-08-10
 
 - New skill **pf-auto** — autopilot: after spec approval the orchestrator drives the whole task to done via subagents. Waves of 1–3-ticket batches; a mandatory independent review gate per batch; fix loops ≤3 rounds with a fresh executor on a stronger model on round 3; parallelism ≤2 for disjoint batches; safety stops (human-only questions, spec contradictions → pf-replan, irreversible external actions, orchestrator window thresholds); a final whole-task review on the strongest model with a single fix pass. Wave registry in the HANDOFF (pf-handoff companion) or standalone `.agents/runtime/autopilot-run.md`. Dispatch prompt templates in `skills/pf-auto/references/`.
