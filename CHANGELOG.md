@@ -2,6 +2,13 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.2.1 — 2026-08-10
+
+Independent-QA fixes:
+
+- README (both languages): clone commands switched from SSH (`git@github.com:…`) to `https://` — anonymous installation by the book now works without an SSH key.
+- `install.sh --link --update` now really converts existing copies into symlinks; with `--update`, replacement happens only for our own skills/agents (`name:` must match) — foreign same-named items are skipped with a notice.
+
 ## v1.2.0 — 2026-08-10
 
 Clean-machine install fixes (issues reproduced in a sandbox with a fresh $HOME and re-tested green):

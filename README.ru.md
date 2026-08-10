@@ -46,7 +46,7 @@ English overview: [README.md](README.md)
 ## Установка
 
 ```bash
-git clone git@github.com:turvodnik/pf-workflow.git && cd pf-workflow
+git clone https://github.com/turvodnik/pf-workflow.git && cd pf-workflow
 bash install.sh          # копии скиллов в ~/.claude/skills (+ .codex/.gemini, если эти CLI есть) и агентов в ~/.claude/agents
 # bash install.sh --update  # обновить существующие копии после git pull
 # bash install.sh --link    # режим симлинков вместо копий (клон тогда не перемещать)

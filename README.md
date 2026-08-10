@@ -46,7 +46,7 @@ Session continuity (live state cheat-sheet, 60/80/90 % window thresholds, compac
 ## Install
 
 ```bash
-git clone git@github.com:turvodnik/pf-workflow.git && cd pf-workflow
+git clone https://github.com/turvodnik/pf-workflow.git && cd pf-workflow
 bash install.sh          # copies skills into ~/.claude/skills (+ .codex/.gemini if those CLIs exist) and agents into ~/.claude/agents
 # bash install.sh --update  # refresh existing copies after git pull
 # bash install.sh --link    # symlink mode instead of copies (then don't move the clone)

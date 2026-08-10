@@ -46,10 +46,20 @@ install_one() {
     return 0
   fi
   if [ -e "$dst" ]; then
-    if [ "$UPDATE" = 1 ] && [ "$MODE" = "copy" ]; then
-      rm -rf "$dst"; cp -R "$src" "$dst"; echo "OK (обновлено): $dst"
+    if [ "$UPDATE" = 1 ]; then
+      # Заменяем только СВОЁ (name: совпадает в SKILL.md/файле агента) — чужое не трогаем.
+      local base own_name
+      base="$(basename "$dst")"; own_name="${base%.md}"
+      if { [ -d "$dst" ] && grep -q "^name: $own_name\$" "$dst/SKILL.md" 2>/dev/null; } || \
+         { [ -f "$dst" ] && grep -q "^name: $own_name\$" "$dst" 2>/dev/null; }; then
+        rm -rf "$dst"
+        if [ "$MODE" = "link" ]; then ln -s "$src" "$dst"; echo "OK (link, заменил копию): $dst"
+        else cp -R "$src" "$dst"; echo "OK (обновлено): $dst"; fi
+      else
+        echo "ПРОПУСК: $dst — не похоже на наш скилл/агент (name: не совпал); разберитесь вручную"
+      fi
     else
-      echo "ПРОПУСК: $dst уже существует (обновить копию: --update)"
+      echo "ПРОПУСК: $dst уже существует (заменить: --update)"
     fi
     return 0
   fi
