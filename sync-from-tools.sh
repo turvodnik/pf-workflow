@@ -12,7 +12,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 [ -d "$TOOLS/skill-library/skills/pf-spec" ] || { echo "ОШИБКА: не найден канон в $TOOLS" >&2; exit 2; }
 
-for sk in pf-spec pf-tickets pf-do pf-replan pf-retro; do
+for sk in pf-spec pf-tickets pf-do pf-replan pf-retro pf-auto; do
   mkdir -p "$HERE/skills/$sk"
   rsync -a --delete "$TOOLS/skill-library/skills/$sk/" "$HERE/skills/$sk/"
 done

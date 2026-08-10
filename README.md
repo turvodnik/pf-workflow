@@ -4,12 +4,13 @@
 
 Русская версия: [README.ru.md](README.ru.md)
 
-Rules, 7 skills, 3 agents and a set of hooks that turn work with CLI agents (Claude Code, Codex, Gemini) from "one endless chat" into a managed process:
+Rules, 6 skills and 3 agents that turn work with CLI agents (Claude Code, Codex, Gemini) from "one endless chat" into a managed process:
 
 ```
 idea → pf-spec (interview → SPEC.md) → pf-tickets (slice into tickets)
      → pf-do (execute a ticket in a fresh window) → pf-replan (change of course)
      → pf-retro (process review every 2 weeks)
+     → pf-auto (autopilot: the same pipeline driven end-to-end by subagents — explicit command only)
      + pf-handoff / pf-resume (session continuity: state cheat-sheet + compaction survival)
 ```
 
@@ -29,6 +30,7 @@ idea → pf-spec (interview → SPEC.md) → pf-tickets (slice into tickets)
 | `skills/pf-do` | Executor contract: fresh window, evidence-based acceptance, commit per ticket, statuses, journal |
 | `skills/pf-replan` | Change of course: "spec → tickets → commits" tracing, impact classes A/B/C, surgical rollback |
 | `skills/pf-retro` | Retro over all projects' journals; automation trust ladder L1 → L2 → L3 |
+| `skills/pf-auto` | Autopilot: subagent waves, a review gate at every milestone, fix loops ≤3 with model escalation, parallelism ≤2, safety stops |
 | `agents/` | pf-architect (spec + slicing), pf-executor (one ticket, Sonnet-class), pf-reviewer (acceptance with evidence) |
 | `docs/rules-sections.ru.md` | Ready-made rule sections §7–§12 for your global AGENTS.md/CLAUDE.md (generated from the canon) |
 | `docs/PROCESS.en.md` | Full process description from idea to retro ([RU](docs/PROCESS.ru.md)) |

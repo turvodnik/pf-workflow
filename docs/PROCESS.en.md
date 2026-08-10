@@ -63,6 +63,18 @@ Automation trust ladder: **L1** — report only → **L2** — applies with conf
 - **pf-executor** — executes exactly one ticket (Sonnet-class: cheap, works from a ready plan).
 - **pf-reviewer** — re-verifies every criterion itself, never trusts "Result" on faith; verdict `done` or a return with a 🔴/🟡/💭 list.
 
-## 8. Session continuity — the pf-handoff companion
+## 8. pf-auto — autopilot ("do everything yourself, to the end")
+
+Engages **only** on an explicit command `/pf-auto` or phrase ("autopilot", "do it all yourself to the end"); engaging silently is forbidden. Requires an approved SPEC and tickets — the interview is not automatable, a human answers it. From there the orchestrator drives the task to completion on its own:
+
+- Groups tickets into **batches of 1–3** (size capped by the executor's context window) and runs waves ordered by dependencies; ≤2 batches in parallel, and only with disjoint files.
+- Each batch is executed by a **fresh subagent** under the pf-do contract: the full result goes into the tickets, the orchestrator receives a ≤15-line summary (its window is reserved for coordination).
+- After each batch — a **mandatory gate**: an independent reviewer subagent re-verifies every criterion with evidence against the diff; the executor's "Result" is never taken on faith.
+- Findings → a **fix loop of ≤3 rounds**: rounds 1–2 — the same executor, round 3 — a fresh executor on a stronger model; past the limit — `blocked` and a report to the human. No infinite loops.
+- **Stops**: a question only the human can answer; a ticket contradicting the spec (a mini pf-replan report); irreversible external actions (publishing to a live site, deploys, mailings, DNS, money) — prepare everything and ask; the orchestrator's context-window thresholds.
+- **Finale**: a whole-task review against the SPEC on the strongest available model → a single fix pass → done and a report to the human (what was done / evidence / parked notes / wave-and-round statistics).
+- The wave registry lives in the HANDOFF (if the pf-handoff companion is installed) or in `.agents/runtime/autopilot-run.md`. Dispatch prompt templates: `skills/pf-auto/references/dispatch-templates.md`.
+
+## 9. Session continuity — the pf-handoff companion
 
 Long sessions hit the context window. That problem is solved by a separate tool, [pf-handoff](https://github.com/turvodnik/pf-handoff): a live task-state cheat-sheet, a window-usage gauge with 60/80/90 % thresholds, surviving history compaction, and pickup in a new chat (`/pf-resume`). pf-do and pf-replan are designed to pair with it, but pf-workflow works without it too.

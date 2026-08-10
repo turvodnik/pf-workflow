@@ -18,6 +18,7 @@ Before starting any task the agent estimates its scale and acts accordingly:
 - Start: read the project's AGENTS.md → the `.agents/journal/` for the last 3 days → task packets with status ≠ done → the active HANDOFF (§13), if any → check the list of available skills and use the matching one (don't reinvent a process a skill already describes).
 - Finish (or a significant milestone): a journal entry (§10) + update the statuses of your task packets + checkpoint/close the HANDOFF (`pf-handoff`).
 - Executing a part of an L-task happens in a fresh session under `pf-do`: the context is only the packet + AGENTS.md, not the tail of someone else's chat (cheaper on limits, sharper in quality).
+- Autopilot — only on an explicit human command/phrase ("/pf-auto", "autopilot", "do it all yourself to the end"): subagent orchestration under the `pf-auto` skill. Engaging it silently is forbidden.
 - Model per role: thinking/designing/reviewing — a top-tier model; executing a ready plan — Sonnet-class.
 
 ## 9. Task packets — the agents' file protocol

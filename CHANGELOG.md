@@ -2,6 +2,13 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.3.0 — 2026-08-10
+
+- New skill **pf-auto** — autopilot: after spec approval the orchestrator drives the whole task to done via subagents. Waves of 1–3-ticket batches; a mandatory independent review gate per batch; fix loops ≤3 rounds with a fresh executor on a stronger model on round 3; parallelism ≤2 for disjoint batches; safety stops (human-only questions, spec contradictions → pf-replan, irreversible external actions, orchestrator window thresholds); a final whole-task review on the strongest model with a single fix pass. Wave registry in the HANDOFF (pf-handoff companion) or standalone `.agents/runtime/autopilot-run.md`. Dispatch prompt templates in `skills/pf-auto/references/`.
+- pf-tickets now mentions the `/pf-auto` launch option; rules §8 gains one line: autopilot only on an explicit human command.
+- Verified by a synthetic run: two parallel executors, both gates passed with evidence, a planted SPEC↔ticket drift caught by the final review, a single fix pass + scoped re-review clean, and the stop boundary held (no external publish without the human).
+- Independent pre-release QA (per the author's release rule): headline skill count fixed (6, hooks mention removed — they ship with pf-handoff), author-environment paths in pf-retro/pf-architect marked as adaptable, a registry template added for standalone autopilot runs.
+
 ## v1.2.1 — 2026-08-10
 
 Independent-QA fixes:
