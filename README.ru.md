@@ -47,7 +47,9 @@ English overview: [README.md](README.md)
 
 ```bash
 git clone git@github.com:turvodnik/pf-workflow.git && cd pf-workflow
-bash install.sh          # симлинки скиллов в ~/.claude|.codex|.gemini/skills и агентов в ~/.claude/agents
+bash install.sh          # копии скиллов в ~/.claude/skills (+ .codex/.gemini, если эти CLI есть) и агентов в ~/.claude/agents
+# bash install.sh --update  # обновить существующие копии после git pull
+# bash install.sh --link    # режим симлинков вместо копий (клон тогда не перемещать)
 # затем вставьте docs/rules-sections.ru.md в свой глобальный AGENTS.md/CLAUDE.md
 # рекомендуемый компаньон: github.com/turvodnik/pf-handoff (непрерывность сессий)
 ```

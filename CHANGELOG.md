@@ -2,6 +2,15 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.2.0 — 2026-08-10
+
+Clean-machine install fixes (issues reproduced in a sandbox with a fresh $HOME and re-tested green):
+
+- **`install.sh` now installs copies by default** — the clone may be moved or deleted afterwards (symlink mode caused broken links when the clone was relocated). `--link` restores the old symlink behaviour (update via `git pull`; don't move the clone), `--update` refreshes existing copies.
+- **No junk directories**: `~/.codex/skills` and `~/.gemini/skills` are touched only if those CLIs are actually present on the machine (`~/.codex` / `~/.gemini` exist).
+- **Anti-hijack**: symlinks created by any other skill-management tooling are never overwritten — skipped with a notice (previously `ln -sfn` silently re-pointed them at the clone).
+- README (both languages): install modes documented.
+
 ## v1.1.0 — 2026-08-10
 
 Public release.

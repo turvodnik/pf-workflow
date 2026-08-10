@@ -47,7 +47,9 @@ Session continuity (live state cheat-sheet, 60/80/90 % window thresholds, compac
 
 ```bash
 git clone git@github.com:turvodnik/pf-workflow.git && cd pf-workflow
-bash install.sh          # symlinks skills into ~/.claude|.codex|.gemini/skills and agents into ~/.claude/agents
+bash install.sh          # copies skills into ~/.claude/skills (+ .codex/.gemini if those CLIs exist) and agents into ~/.claude/agents
+# bash install.sh --update  # refresh existing copies after git pull
+# bash install.sh --link    # symlink mode instead of copies (then don't move the clone)
 # then paste docs/rules-sections.ru.md into your global AGENTS.md/CLAUDE.md
 # recommended companion: github.com/turvodnik/pf-handoff (session continuity)
 ```
