@@ -24,9 +24,9 @@ Before starting any task the agent estimates its scale and acts accordingly:
 ## 9. Task packets — the agents' file protocol
 
 - Work is exchanged between agents and sessions only through files: `.agents/runtime/tasks/T-###-slug.md` (template in the `pf-tickets` skill).
-- Frontmatter: `id, title, status (todo|in_progress|review|blocked|done|cancelled), owner, depends_on, spec, updated`.
-- Body: Context (self-contained — the executor never sees the author's chat) / Task / Acceptance criteria / Constraints / Result.
-- Executor contract: claimed — `status: in_progress` + owner; finished — fill in "Result" (what was done, commits, deviations, evidence) and set `status: review`; stuck — `status: blocked` + reason. `done` is set by the human or a reviewer.
+- Frontmatter: `id, title, status (todo|in_progress|review|blocked|done|cancelled), owner (claude|codex|gemini|<your handle> — the shipped skills and templates use the origin system's enum with `vladimir`; substitute your own), depends_on, spec, updated`.
+- Body: Context (self-contained — the executor never sees the author's chat) / Task / Acceptance criteria / Constraints / Result. In the shipped Russian templates the section names are the protocol literals — «Контекст / Задача / Критерии приёмки / Ограничения / Результат»; keep whichever set you pick consistent across packets, skills and reviewers.
+- Executor contract: claimed — `status: in_progress` + owner; finished — fill in the result section («Результат» in the shipped templates: what was done, commits, deviations, evidence) and set `status: review`; stuck — `status: blocked` + reason. `done` is set by the human or a reviewer.
 - One packet = one session ≤ ~2 hours of work. Bigger — slice smaller.
 - The idea or a decision changed mid-work — don't push on by inertia and don't redo everything: only via `pf-replan` (impact assessment → SPEC update → cancelling/rewriting tickets → surgical commit rollback if needed).
 
