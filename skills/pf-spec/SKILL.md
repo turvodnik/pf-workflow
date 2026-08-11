@@ -12,7 +12,7 @@ Goal: before work starts, learn everything the human decides and record it in SP
 ## Interview rules
 
 1. One question at a time. Wait for the answer. Do not dump a list of ten questions.
-2. Attach your recommended answer and its consequences to every question: «я бы выбрал X, потому что …; цена — …». The human may simply agree.
+2. Attach your recommended answer and its consequences to every question: "I would pick X because …; the cost is …" (in the origin system the answer is phrased in Russian). The human may simply agree.
 3. Facts learnable from files, code, git or the internet — find YOURSELF before asking. Ask only what is the human's decision: goals, boundaries, priorities, budgets, tastes.
 4. Topic order: goal and motivation → boundaries (what we do NOT do) → consumers of the result → data and sources → integrations and secrets (names only, per §5) → acceptance criteria → risks and reactions → timing/priority.
 5. Continue until every template section can be filled without invention. "I don't know" — offer a default and mark it in the spec as an assumption.
