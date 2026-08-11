@@ -67,7 +67,7 @@ bash install.sh          # copies skills into ~/.claude/skills (+ .codex/.gemini
 
 The canon lives in the author's working environment (`_tools/skill-library`); changes arrive here as releases: `bash sync-from-tools.sh` → `CHANGELOG.md` → commit → tag `vX.Y.Z` → push. Ongoing work happens on the `dev` branch; `main` holds released states only. Companion standalone distribution of the context subsystem: [pf-handoff](https://github.com/turvodnik/pf-handoff).
 
-Skill instructions are in English. The rules sections and artifact templates (SPEC, task packets, registries) are Russian — the author's working language; the process design itself is language-agnostic, and the skills answer in the user's language. English translation of the rules: [docs/rules-sections.en.md](docs/rules-sections.en.md).
+Skill and agent instructions are in English. The rules sections and artifact templates (SPEC, task packets, registries) are Russian — the author's working language; the process design itself is language-agnostic, and the skills answer in the user's language. English translation of the rules: [docs/rules-sections.en.md](docs/rules-sections.en.md).
 
 ---
 

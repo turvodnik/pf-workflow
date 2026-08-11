@@ -2,6 +2,14 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.6.1 — 2026-08-12
+
+English follow-up (discretionary findings of the v1.6.0 independent QA):
+
+- The three agents (`pf-architect`, `pf-executor`, `pf-reviewer`) are rewritten in English, same format as the skills: a Russian one-liner leads the description, protocol literals and priorities stay verbatim, and each agent answers in the user's language.
+- `install.sh` messages and comments are English (logic unchanged).
+- README language note now covers the agents; the English changelog quotes the pf-do blocker commit literal in its actual Russian form.
+
 ## v1.6.0 — 2026-08-12
 
 Skills rewritten in English:
@@ -15,7 +23,7 @@ Skills rewritten in English:
 
 Findings from a second isolated test run (edge cases, not the happy path):
 
-- **pf-do**: work done before a blocker must now be committed too (`T-###: blocked — saving what was done`) — an uncommitted tail breaks the next gate's diff and is lost when the session changes; evidence in "Result" must be command output, not a recollection (a run produced a "4 sentences" claim where the file had 3 — the milestone gate caught it).
+- **pf-do**: work done before a blocker must now be committed too (the commit-message literal is Russian: `T-###: blocked — сохраняю сделанное, <причина>`, "saving what was done") — an uncommitted tail breaks the next gate's diff and is lost when the session changes; evidence in "Result" must be command output, not a recollection (a run produced a "4 sentences" claim where the file had 3 — the milestone gate caught it).
 - **pf-do / pf-auto**: a ticket that needs a secret is an immediate blocker — subagents and headless runs cannot call the secret helper. Such tickets are not sent through the fix loop; they are flagged "needs an interactive session" and, when known in advance, kept out of the waves entirely.
 - **pf-auto**: a working-tree hygiene check between waves.
 - Verified in the sandbox: milestone gating (one reviewer over three independent batches, caught a false claim), executor behaviour on contradictory criteria / missing source material / unavailable secrets (three correct BLOCKEDs, nothing invented), and orchestrator continuity — a successor given only the HANDOFF restored the goal, the registry, the exact next step and the blockers, and spotted the uncommitted tail the orchestrator had missed.
