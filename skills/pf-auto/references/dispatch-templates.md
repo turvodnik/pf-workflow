@@ -1,8 +1,8 @@
-# Шаблоны диспетчеризации pf-auto
+# pf-auto dispatch templates
 
-Подставляй конкретику вместо `<…>`. Промпт описывает ОДНО задание, а не историю сессии: свежему субагенту нужны его тикеты, интерфейсы, ограничения — и ничего больше. Форматы по мотивам superpowers subagent-driven-development (MIT), формулировки свои.
+Substitute specifics for `<…>`. A prompt describes ONE job, not session history: a fresh subagent needs its tickets, interfaces, constraints — and nothing else. Formats inspired by superpowers subagent-driven-development (MIT), wording original. Prompts are written in Russian for the executors below — keep them as is; RU literals («Результат», «ЧИСТО», «СПИСОК ЗАМЕЧАНИЙ») are protocol tokens.
 
-## 1. Исполнитель задания
+## 1. Job executor
 
 ```
 Ты — исполнитель задания в автопилоте pf-auto. Работай строго по контракту скилла pf-do.
@@ -15,9 +15,9 @@
 Отчёт: полный результат (что сделано, коммиты, отклонения, доказательства по каждому критерию) — в раздел «Результат» каждого тикета. В ответ — только сводка ≤15 строк: статус (DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED), коммиты, строка о тестах, сомнения.
 ```
 
-Статусы обрабатывай так: DONE → гейт; DONE_WITH_CONCERNS → прочитай сомнения, реши до гейта; NEEDS_CONTEXT → дай контекст, перезапусти (раунд не тратится); BLOCKED → разбери причину: мало контекста → дай и перезапусти; не хватает силы → модель старше; задание велико → раздели; кривая постановка → стоп к человеку.
+Handle statuses: DONE → gate; DONE_WITH_CONCERNS → read the concerns, decide before the gate; NEEDS_CONTEXT → provide context, relaunch (no round spent); BLOCKED → analyze the cause: not enough context → provide and relaunch; not enough capability → a stronger model; job too big → split it; broken task statement → stop and ask the human.
 
-## 2. Ревьюер задания (гейт)
+## 2. Job reviewer (gate)
 
 ```
 Ты — независимый ревьюер задания (роль pf-reviewer). Исполнителю не доверяй: «Результат» в тикетах — заявление, а не доказательство.
@@ -29,7 +29,7 @@
 Вердикт в ответ (≤20 строк): по каждому критерию ✅/❌ с доказательством одной строкой; итог — ЧИСТО или СПИСОК ЗАМЕЧАНИЙ по приоритетам 🔴 (блокирует) / 🟡 (исправить) / 💭 (на усмотрение). 💭 не блокируют приёмку — они уходят в отчёт.
 ```
 
-## 3. Фикс-раунд
+## 3. Fix round
 
 ```
 Раунд <N> из 3. Замечания ревьюера по твоему заданию (тикеты <T-###…>) — исправь каждое 🔴 и 🟡:
@@ -38,9 +38,9 @@
 После исправления: перезапусти проверки по затронутым критериям, допиши в «Результат» тикетов раздел «Фикс-раунд <N>: что изменено, коммиты, доказательства». В ответ — сводка ≤10 строк.
 ```
 
-Раунды 1–2 — продолжение того же субагента-исполнителя. Раунд 3 — свежий субагент на более сильной модели, в промпт добавь: «Предыдущий исполнитель пробовал дважды и не закрыл замечания — его попытки описаны в "Результате" тикетов. Задание теперь твоё: сначала пойми, почему не получалось, потом чини». Реревью после каждого раунда — шаблон 2, но проверяются только замечания из списка + новый дифф раунда.
+Rounds 1–2 — a continuation of the same executor subagent. Round 3 — a fresh subagent on a stronger model; add to its prompt: «Предыдущий исполнитель пробовал дважды и не закрыл замечания — его попытки описаны в "Результате" тикетов. Задание теперь твоё: сначала пойми, почему не получалось, потом чини». Re-review after every round — template 2, but only the listed remarks + the round's new diff are checked.
 
-## 4. Финальный сквозной ревьюер
+## 4. Final end-to-end reviewer
 
 ```
 Ты — финальный ревьюер всей задачи (самая сильная модель). Проверь результат целиком против SPEC.md <путь>.
@@ -51,4 +51,4 @@
 Вердикт (≤25 строк): критерии SPEC ✅/❌ с доказательствами; замечания 🔴/🟡/💭; решение по каждому запаркованному.
 ```
 
-По итогам: замечания → один фикс-заход одним субагентом со всем списком + одно scoped-реревью; дальше — только парковка с вердиктом или blocked к человеку. Второй фикс-волны не бывает.
+Afterwards: remarks → one fix pass by one subagent with the whole list + one scoped re-review; beyond that — only parking with a verdict, or blocked to the human. There is never a second fix wave.

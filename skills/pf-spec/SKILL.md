@@ -1,27 +1,29 @@
 ---
 name: pf-spec
-description: Допрос перед большой (L) задачей — пошаговые вопросы до полного покрытия, на выходе SPEC.md. Use when starting a large task or new project, when the user asks «сделай спеку», «спек-режим», «/pf-spec», or when scope is unclear (правило масштаба §7).
+description: Interview before a large (L) task — step-by-step questions until full coverage, producing SPEC.md. Use when starting a large task or new project, when the user asks «сделай спеку», «спек-режим», «/pf-spec», or when scope is unclear (scale rule §7).
 ---
 
-# pf-spec — допрос до спецификации
+# pf-spec — interview down to a specification
 
-Цель: до начала работы выяснить всё, что решает человек, и зафиксировать в SPEC.md. Человек отвечает на вопросы ОДИН раз в начале — дальше агенты работают автономно.
+Always communicate with the user in the user's language (Russian in the origin system); SPEC.md follows the template.
 
-## Правила допроса
+Goal: before work starts, learn everything the human decides and record it in SPEC.md. The human answers questions ONCE at the start — then the agents work autonomously.
 
-1. Один вопрос за раз. Жди ответа. Не вываливай список из десяти вопросов.
-2. К каждому вопросу приложи свой рекомендуемый ответ и его последствия: «я бы выбрал X, потому что …; цена — …». Человек может просто согласиться.
-3. Факты, которые можно узнать из файлов, кода, git или интернета — ищи САМ до вопроса. Спрашивай только то, что является решением человека: цели, границы, приоритеты, бюджеты, вкусы.
-4. Порядок тем: цель и мотивация → границы (что НЕ делаем) → потребители результата → данные и источники → интеграции и секреты (только имена, по §5) → критерии приёмки → риски и реакция на них → сроки/приоритет.
-5. Продолжай, пока не сможешь заполнить каждый раздел шаблона без выдумок. Ответ «не знаю» — предложи вариант по умолчанию и пометь в спеке как допущение.
-6. Отвечай по §0: простыми словами + термин рядом.
+## Interview rules
 
-## Выход
+1. One question at a time. Wait for the answer. Do not dump a list of ten questions.
+2. Attach your recommended answer and its consequences to every question: «я бы выбрал X, потому что …; цена — …». The human may simply agree.
+3. Facts learnable from files, code, git or the internet — find YOURSELF before asking. Ask only what is the human's decision: goals, boundaries, priorities, budgets, tastes.
+4. Topic order: goal and motivation → boundaries (what we do NOT do) → consumers of the result → data and sources → integrations and secrets (names only, per §5) → acceptance criteria → risks and reactions → timing/priority.
+5. Continue until every template section can be filled without invention. "I don't know" — offer a default and mark it in the spec as an assumption.
+6. Answer per §0: plain words + the term alongside.
 
-1. Заполни `SPEC.md` по `references/spec-template.md` в корне проекта (или в папке фазы по конвенции проекта).
-2. Покажи человеку выжимку на 10–15 строк, попроси «ок» или правки.
-3. После «ок» предложи `pf-tickets`. SPEC без «ок» человека — черновик, по нему не работаем.
+## Output
 
-## Когда НЕ использовать
+1. Fill `SPEC.md` per `references/spec-template.md` in the project root (or the phase folder per project convention).
+2. Show the human a 10–15 line digest, ask for «ок» or corrections.
+3. After «ок» offer `pf-tickets`. A SPEC without the human's «ок» is a draft — no work happens on it.
 
-S/M-задачи (§7): допрос там избыточен — тратит время человека и лимиты.
+## When NOT to use
+
+S/M tasks (§7): the interview is overkill there — it wastes the human's time and the limits.

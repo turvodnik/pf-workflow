@@ -2,6 +2,14 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.6.0 — 2026-08-12
+
+Skills rewritten in English:
+
+- All six skill instruction bodies (`pf-spec`, `pf-tickets`, `pf-do`, `pf-replan`, `pf-retro`, `pf-auto`) and the instructional references (`dispatch-templates`, `maturity-scale`) are now English — ≈35–45% fewer tokens per skill load, readable by the international audience. Trigger phrases in the descriptions stay bilingual.
+- Behavior contracts unchanged: packet statuses, section names («Результат» etc.), journal format and the pf-auto dispatch-prompt protocol literals are kept verbatim. Artifact templates (`spec-template`, `task-template`, `registry-template`, `retro-template`) deliberately stay Russian — the origin system's artifacts are Russian; replace them with your language if needed. The skills now instruct the agent to answer in the user's language.
+- Verified before release: a 20-phrase Russian trigger test (2 runs before / 2 after, 80/80 match, including the §8 autopilot key phrases) and a live executor run — output language and artifact formats unchanged.
+
 ## v1.5.0 — 2026-08-11
 
 Findings from a second isolated test run (edge cases, not the happy path):

@@ -1,32 +1,34 @@
 ---
 name: pf-retro
-description: Ретро рабочих процессов — сводка журналов и task-пакетов всех проектов за период, уровни автоматизаций L1→L3, предложения улучшений с ценой и риском. Use when user runs «/pf-retro» или просит пересмотреть/улучшить процессы (каданс: 2 недели → месяц).
+description: Workflow retrospective — a digest of journals and task packets across all projects for the period, automation maturity levels L1→L3, improvement proposals with price and risk. Use when user runs «/pf-retro» или просит пересмотреть/улучшить процессы, ретро (cadence: 2 weeks → a month).
 ---
 
-# pf-retro — пересмотр рабочих процессов
+# pf-retro — reviewing the workflows
 
-Цель: регулярно смотреть на факты (журналы, пакеты, git) и предлагать улучшения. Ретро само — уровень L1: только отчёт и предложения, ничего не менять без «ок» человека.
+Always communicate with the user in the user's language (Russian in the origin system); the retro report follows the template.
 
-## Сбор данных (период — с прошлого ретро)
+Goal: regularly look at the facts (journals, packets, git) and propose improvements. The retro itself is level L1: report and proposals only, change nothing without the human's «ок».
 
-Пути ниже — среда автора (`~/ai` — корень проектов, `_tools/` — служебная папка, `_tools/reports/` — отчёты ретро); в своей среде подставь свои корень проектов, папку отчётов и способ поиска.
+## Data collection (period — since the previous retro)
 
-1. Журналы всех проектов: `~/ai/*/.agents/journal/*.md` за период (быстрый срез — `_tools/history-search.sh`).
-2. Task-пакеты: `blocked` и «висящие» в `review`/`in_progress` дольше недели.
-3. Git: активность по проектам (`git log --since=...`), проекты вообще без коммитов.
-4. Использование: какие скиллы/плагины/агенты реально применялись (по журналам), какие — ни разу за 2 периода.
+The paths below are the author's environment (`~/ai` — projects root, `_tools/` — the utility folder, `_tools/reports/` — retro reports); in your environment substitute your own projects root, reports folder and search method.
 
-## Анализ
+1. All projects' journals: `~/ai/*/.agents/journal/*.md` for the period (quick slice — `_tools/history-search.sh`).
+2. Task packets: `blocked`, plus those hanging in `review`/`in_progress` longer than a week.
+3. Git: activity per project (`git log --since=...`), projects with no commits at all.
+4. Usage: which skills/plugins/agents were actually applied (per journals), which — not once in 2 periods.
 
-- Что буксовало: blocked-пакеты, переделки, повторные вопросы человеку об одном и том же.
-- Дисциплина: где журнал не вёлся, где пакеты закрыты без «Результата» — это дыры в истории.
-- Кандидаты на автоматизацию: всё, что повторилось руками ≥3 раз за период.
-- Уровни зрелости автоматизаций — по `references/maturity-scale.md`; повышение только после 2 чистых прогонов, инцидент = понижение.
-- Лишнее: скиллы/плагины/агенты без применения за 2 периода — кандидаты на detach (меньше контекста — меньше расход лимитов).
-- Контекст (если установлен компаньон pf-handoff): просмотри `~/.claude/context-state/compacts.log` и качество HANDOFF-файлов за период; пороги §13 корректируй по фактам.
+## Analysis
 
-## Выход
+- What stalled: blocked packets, redone work, repeated questions to the human about the same thing.
+- Discipline: where the journal was not kept, where packets closed without «Результат» — holes in the history.
+- Automation candidates: anything repeated by hand ≥3 times over the period.
+- Automation maturity levels — per `references/maturity-scale.md`; promotion only after 2 clean runs, an incident = demotion.
+- Dead weight: skills/plugins/agents unused for 2 periods — detach candidates (less context — lower limit spend).
+- Context (if the pf-handoff companion is installed): review `~/.claude/context-state/compacts.log` and the period's HANDOFF quality; adjust §13 thresholds by facts.
 
-1. Отчёт `_tools/reports/retro-YYYY-MM-DD.md` по `references/retro-template.md`.
-2. Предложения списком, каждое с ценой, риском и «что будет, если не делать» (§0).
-3. Решения человека зафиксировать в отчёте; принятые изменения — отдельными задачами.
+## Output
+
+1. Report `_tools/reports/retro-YYYY-MM-DD.md` per `references/retro-template.md`.
+2. Proposals as a list, each with price, risk and "what happens if we don't" (§0).
+3. Record the human's decisions in the report; accepted changes — as separate tasks.

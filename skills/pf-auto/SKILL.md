@@ -1,47 +1,49 @@
 ---
 name: pf-auto
-description: Автопилот конвейера — после утверждения SPEC выполнить всё до конца субагентами. Волны заданий по 1–3 тикета, независимое ревью на каждой вехе, фикс-циклы ≤3 с эскалацией модели, параллель ≤2, стопы на опасных границах. Use ONLY on explicit command or phrase — «/pf-auto», «сделай на автопилоте», «сделай сам всё до конца», autopilot. Молча включать запрещено (§8).
+description: Pipeline autopilot — after SPEC approval, execute everything to the end with subagents. Waves of 1–3 tickets, independent review at every milestone, fix cycles ≤3 with model escalation, parallelism ≤2, stops at dangerous boundaries. Use ONLY on explicit command or phrase — «/pf-auto», «сделай на автопилоте», «сделай сам всё до конца», autopilot. Never enable silently (§8).
 ---
 
-# pf-auto — автопилот: от утверждённой спеки до done
+# pf-auto — autopilot: from approved spec to done
 
-Ты — оркестратор. Ты НЕ выполняешь тикеты сам: раздаёшь задания субагентам, принимаешь короткие сводки, проверяешь чужими руками, ведёшь реестр. Твоё окно — самый дорогой ресурс: полные результаты живут в тикетах и файлах, а не в чате.
+Always communicate with the user in the user's language (Russian in the origin system). Registry, tickets, journal and report formats stay exactly as specified.
 
-## Предусловия
+You are the orchestrator. You do NOT execute tickets yourself: you dispatch jobs to subagents, accept short summaries, verify through independent hands, and keep the registry. Your window is the most expensive resource: full results live in tickets and files, not in the chat.
 
-- Утверждённый SPEC.md и тикеты в `.agents/runtime/tasks/`. Нет — сначала обычные `/pf-spec` → «ок» человека → `/pf-tickets`: допрос не автоматизируется, на вопросы отвечает человек.
-- Явная команда человека (см. description). Автопилот, включённый молча, — нарушение §8.
+## Preconditions
 
-## Параметры (дефолты; человек может переопределить словами при запуске)
+- An approved SPEC.md and tickets in `.agents/runtime/tasks/`. Missing — first the regular `/pf-spec` → human's «ок» → `/pf-tickets`: the interview is not automatable, a human answers the questions.
+- An explicit human command (see description). Autopilot enabled silently is a §8 violation.
 
-`fix_rounds = 3` · `parallel = 2` · `batch = 1–3 тикета на задание` · `gate = auto` (по риску; альтернативы словами: «гейт после каждого» / «гейт по вехам»).
+## Parameters (defaults; the human may override in words at launch)
 
-## Цикл
+`fix_rounds = 3` · `parallel = 2` · `batch = 1–3 tickets per job` · `gate = auto` (by risk; alternatives in words: «гейт после каждого» / «гейт по вехам»).
 
-1. **Волны.** Сгруппируй тикеты в задания по 1–3 связанных (по `depends_on` и объёму: задание ≤ половины окна исполнителя — эвристика §13). Построй порядок волн; параллельно — до `parallel` заданий и только без общих файлов. Выведи план волн одной таблицей для прозрачности и продолжай, не дожидаясь ответа.
-2. **Реестр перед каждой волной**: «задание → тикеты → субагент → статус» — в HANDOFF (если установлен компаньон pf-handoff, правило §13) или в `.agents/runtime/autopilot-run.md` (шаблон — `references/registry-template.md`). Обновляй на каждом событии: сводка принята, вердикт ревью, раунд фикса.
-3. **Исполнитель** — свежий субагент с чистым контекстом (механика — Sonnet-класс, интеграция/суждения — старше; модель указывай явно). Перед запуском зафиксируй BASE (`git rev-parse HEAD`). Промпт — по `references/dispatch-templates.md`: пути тикетов + «работай по контракту pf-do» + интерфейсы/решения прежних заданий, которых нет в тикетах + «полный результат — в тикеты, в ответ — сводка ≤15 строк». Историю сессии в промпт не вставлять никогда.
-4. **Гейт** — свежий субагент-ревьюер (роль pf-reviewer) получает пути тикетов + дифф BASE..HEAD файлом + критерии приёмки. Перепроверяет доказательствами, «Результату» исполнителя не верит. Чисто → тикеты `done` (полномочие §9), реестр, следующая волна.
-   **Когда его ставить (`gate = auto`)** — по риску, а не механически:
-   - *после каждого задания* — если задания строят друг на друге или правят исполняемое: код, конфиги, схемы данных, скрипты, инфраструктура. Ошибка тут ложится в фундамент следующих заданий, и поздняя находка стоит кратно дороже ревьюера;
-   - *один гейт на веху* (группу заданий) — если задания независимы и правка дёшева: тексты, документация, отдельные страницы/статьи, разметка. Ревьюер получает диффы всех заданий вехи разом.
-   - **Всегда обязательны, независимо от режима**: гейт перед заданием, которое зависит от результатов группы; гейт перед любым внешним действием; финальный сквозной ревью (п. 7).
-   - Выбранный режим и причину напиши в реестр одной строкой — на ретро видно, угадал ли.
-5. **Фикс-цикл ≤ `fix_rounds`**: раунды 1–2 — тот же исполнитель, замечания дословно; раунд 3 — свежий исполнитель на более сильной модели («предыдущий пробовал дважды — вот его отчёт и открытые замечания»). После каждого раунда — scoped-реревью строго по списку замечаний. Провал после раунда 3 → тикеты `blocked`, эта ветка волн стоит; независимые ветки продолжай; доклад — в финальном отчёте (или сразу, если стоит всё).
-6. **Стопы** — автопилот останавливается и спрашивает человека:
-   - вопрос, решаемый только человеком (копи и задавай пакетом, если не блокирует текущую волну);
-   - **тикету нужен секрет** (API-ключ, пароль, токен): субагенты и headless-запуски обычно не могут вызвать `ai-secret`. Такие тикеты не гоняй по фикс-циклу — сразу `blocked` с пометкой «нужна интерактивная сессия, scope <имя>» и в отчёт человеку. Если это видно заранее — выноси их из волн ещё при планировании;
-   - тикет противоречит SPEC → мини-отчёт в духе pf-replan (класс влияния, варианты);
-   - внешнее необратимое действие — публикация на живой сайт, деплой, рассылка, правки DNS, траты денег: подготовить всё и остановиться. Коммит и push в приватный репо — разрешены (правило pf-do);
-   - пороги окна оркестратора (§13): выше 60 % — новых волн не запускать, принимать текущие, чекпоинт; 90 % — полный handoff и доклад точки останова.
-7. **Финал**: сквозной ревью всего диффа задачи по SPEC — свежий субагент на самой сильной доступной модели. Замечания → ОДИН фикс-заход (один субагент со всем списком, не фиксер-на-замечание) + одно scoped-реревью. Остаток: некритичное — паркуй в отчёт с вердиктом «почему допустимо»; критичное — `blocked` к человеку. Чисто → финальный отчёт человеку: сделано / доказательства / отклонения / запаркованное / статистика (волны, субагенты, раунды фиксов). Запись в журнал (§10).
+## Cycle
 
-8. **Гигиена между волнами**: приняв сводки, проверь `git status` — дерево должно быть чистым. Исполнитель, остановившийся по блокеру, обязан закоммитить сделанное (pf-do п.4); незакоммиченный «хвост» ломает диффы следующих гейтов и теряется при смене сессии.
+1. **Waves.** Group tickets into jobs of 1–3 related ones (by `depends_on` and volume: a job ≤ half the executor's window — §13 heuristic). Build the wave order; in parallel — up to `parallel` jobs, and only with no shared files. Print the wave plan as one table for transparency and continue without waiting for a reply.
+2. **Registry before every wave**: «задание → тикеты → субагент → статус» — in the HANDOFF (if the pf-handoff companion is installed, §13 rule) or in `.agents/runtime/autopilot-run.md` (template — `references/registry-template.md`). Update on every event: summary accepted, review verdict, fix round.
+3. **Executor** — a fresh subagent with a clean context (mechanics — Sonnet-class, integration/judgment — a senior model; state the model explicitly). Before launch record BASE (`git rev-parse HEAD`). The prompt — per `references/dispatch-templates.md`: ticket paths + "work by the pf-do contract" + interfaces/decisions from earlier jobs that are not in the tickets + "full result into the tickets, reply with a summary ≤15 lines". Never paste session history into a prompt.
+4. **Gate** — a fresh reviewer subagent (pf-reviewer role) gets the ticket paths + the BASE..HEAD diff as a file + the acceptance criteria. It re-verifies with proofs and does not trust the executor's «Результат». Clean → tickets `done` (§9 authority), registry, next wave.
+   **When to place gates (`gate = auto`)** — by risk, not mechanically:
+   - *after every job* — when jobs build on each other or touch executables: code, configs, data schemas, scripts, infrastructure. An error here sinks into the foundation of the following jobs, and a late find costs a multiple of a reviewer;
+   - *one gate per milestone* (a group of jobs) — when jobs are independent and a fix is cheap: texts, documentation, separate pages/articles, markup. The reviewer gets all the milestone's diffs at once.
+   - **Always mandatory, regardless of mode**: a gate before a job that depends on the group's results; a gate before any external action; the final end-to-end review (step 7).
+   - Write the chosen mode and the reason into the registry in one line — the retro will show whether you guessed right.
+5. **Fix cycle ≤ `fix_rounds`**: rounds 1–2 — the same executor, remarks verbatim; round 3 — a fresh executor on a stronger model ("the previous one tried twice — here is its report and the open remarks"). After each round — a scoped re-review strictly against the remark list. Failure after round 3 → tickets `blocked`, this branch of waves halts; independent branches continue; the report goes into the final report (or immediately if everything is halted).
+6. **Stops** — the autopilot halts and asks the human:
+   - a question only a human can decide (batch them up unless the current wave is blocked);
+   - **a ticket needs a secret** (API key, password, token): subagents and headless runs usually cannot call `ai-secret`. Do not push such tickets through the fix cycle — straight to `blocked` with «нужна интерактивная сессия, scope <имя>» and into the report to the human. Visible in advance — pull them out of the waves at planning time;
+   - a ticket contradicts the SPEC → a mini-report in the pf-replan spirit (impact class, options);
+   - an external irreversible action — publishing to a live site, deploy, mailing, DNS changes, spending money: prepare everything and stop. Commit and push to the private repo are allowed (pf-do rule);
+   - orchestrator window thresholds (§13): above 60% — launch no new waves, accept current ones, checkpoint; 90% — full handoff and a stop-point report.
+7. **Final**: an end-to-end review of the whole task diff against the SPEC — a fresh subagent on the strongest available model. Remarks → ONE fix pass (one subagent with the whole list, not a fixer-per-remark) + one scoped re-review. Leftovers: non-critical — park in the report with a "why acceptable" verdict; critical — `blocked` to the human. Clean → final report to the human: done / proofs / deviations / parked / statistics (waves, subagents, fix rounds). Journal entry (§10).
 
-## Запрещено
+8. **Hygiene between waves**: after accepting summaries check `git status` — the tree must be clean. An executor stopped by a blocker must commit its work (pf-do step 4); an uncommitted "tail" breaks the diffs of subsequent gates and is lost on session change.
 
-- Выполнять или чинить тикеты руками оркестратора: контекст нужен для координации, а фиксы мимо ревью — дыра в качестве.
-- Ставить `done` без независимой проверки; пропускать обязательные гейты (перед зависимым заданием, перед внешним действием, финальный) — «гейт по вехам» их не отменяет.
-- Продолжать фикс-цикл после лимита; молча отбрасывать замечания (только парковка с вердиктом в отчёте).
-- Запускать параллельно задания с общими файлами.
-- Совершать внешние необратимые действия без вопроса человеку.
+## Forbidden
+
+- Executing or fixing tickets with the orchestrator's hands: the context is for coordination, and fixes bypassing review are a quality hole.
+- Setting `done` without independent verification; skipping mandatory gates (before a dependent job, before an external action, the final one) — «гейт по вехам» does not cancel them.
+- Continuing the fix cycle past the limit; silently dropping remarks (only parking with a verdict in the report).
+- Running jobs with shared files in parallel.
+- Taking external irreversible actions without asking the human.

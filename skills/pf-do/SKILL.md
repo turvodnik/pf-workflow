@@ -1,24 +1,26 @@
 ---
 name: pf-do
-description: Контракт исполнителя тикета (task-пакета) в свежей сессии — выполнить, доказать проверкой, закоммитить, обновить статус/Результат/журнал. Use when asked to «выполни тикет T-###», «выполни task-пакет T-###», run a task packet.
+description: Executor contract for one task packet (ticket) in a fresh session — execute, prove by verification, commit, update status/Результат/journal. Use when asked to «выполни тикет T-###», «выполни task-пакет T-###», «возьми пакет в работу», run a task packet, execute ticket T-###.
 ---
 
-# pf-do — исполнение task-пакета
+# pf-do — executing a task packet
 
-Ты — исполнитель одного пакета. Контекст минимален намеренно: пакет + AGENTS.md. Не запрашивай хвосты чужих чатов — всё нужное обязан содержать пакет; чего не хватает — это блокер, а не повод догадываться.
+Always communicate with the user in the user's language (Russian in the origin system). File formats, section names and statuses stay exactly as written below.
 
-## Шаги
+You are the executor of one packet. The context is minimal by design: the packet + AGENTS.md. Do not ask for other chats' history — the packet must contain everything needed; anything missing is a blocker, not a license to guess.
 
-1. Прочитай пакет `.agents/runtime/tasks/T-###-*.md`, AGENTS.md проекта и глобальные правила. Если зависимости из `depends_on` не в `done`/`review` — остановись и сообщи. Если ведётся HANDOFF задачи (компаньон pf-handoff, §13) — учти его «Состояние» и «Не делать».
-2. Поставь `status: in_progress`, `owner: <ты>`, обнови `updated`.
-3. Выполняй по шагам задачи. Принципы §11: минимальные точечные правки; найден баг — сначала первопричина (systematic-debugging), потом фикс. Пакет длинный — фиксируй прогресс по ходу (промежуточные заметки в «Результат»; при установленном компаньоне pf-handoff — чекпоинт HANDOFF, §13), а не копи до конца: упрёшься в лимит окна — сделанное не пропадёт.
-4. Блокер (нет доступа, противоречие в задаче, сломано соседнее): `status: blocked`, причина — в «Результат», запись в журнал, остановись. НЕ обходи блокер молчаливым «почти сделал». **Сделанное до блокера тоже коммить** («T-###: blocked — сохраняю сделанное, <причина>»): рабочее дерево остаётся чистым, а следующая сессия видит, докуда дошли. Статус при этом не меняется — разблокирует человек.
-   Отдельный случай — **секреты**: если задача требует значения ключа, а `ai-secret` в твоём режиме недоступен (субагенты и headless-запуски часто ограничены), это блокер сразу: `blocked` + «нужна интерактивная сессия с доступом к scope <имя>». Не пытайся обойти, не проси значение в чат, не трать на это раунды.
-5. Перед завершением — проверка по КАЖДОМУ критерию приёмки со свежим выводом команды (verification-before-completion). Нет доказательства — не готово.
-6. Заполни «Результат»: что сделано, коммиты, отклонения, доказательства. Доказательство — это вывод команды, а не пересказ по памяти («3 предложения» без проверки — ложное доказательство, ревьюер это ловит и возвращает задание). Поставь `status: review` — `done` ставит человек или ревьюер.
-7. Коммит(ы) этого тикета обязательны: мелкие, с понятным сообщением; перед коммитом — секрет-скан; хеши — в «Результат» (по ним pf-replan делает точечный откат); push в приватный remote проекта. Запись в журнал (§10).
+## Steps
 
-## Запрещено
+1. Read the packet `.agents/runtime/tasks/T-###-*.md`, the project's AGENTS.md and the global rules. If any dependency in `depends_on` is not `done`/`review` — stop and report. If a task HANDOFF is kept (pf-handoff companion, §13) — honor its «Состояние» and «Не делать».
+2. Set `status: in_progress`, `owner: <you>`, refresh `updated`.
+3. Execute the task step by step. §11 principles: minimal targeted edits; found a bug — root cause first (systematic-debugging), then the fix. Long packet — record progress as you go (interim notes in «Результат»; with the pf-handoff companion installed — a HANDOFF checkpoint, §13) instead of hoarding it until the end: hit the window limit and the finished part must not be lost.
+4. Blocker (no access, contradiction in the task, neighboring code broken): `status: blocked`, reason in «Результат», journal entry, stop. Do NOT slip past a blocker with a silent "almost done". **Commit what was done before the blocker** («T-###: blocked — сохраняю сделанное, <причина>»): the working tree stays clean and the next session sees how far you got. The status stays until a human unblocks.
+   Special case — **secrets**: the task needs a key value but `ai-secret` is unavailable in your mode (subagents and headless runs are often restricted) — that is an immediate blocker: `blocked` + «нужна интерактивная сессия с доступом к scope <имя>». Do not work around it, do not ask for the value in chat, do not burn rounds on it.
+5. Before finishing — check EVERY acceptance criterion against fresh command output (verification-before-completion). No proof — not done.
+6. Fill in «Результат»: what was done, commits, deviations, proofs. A proof is command output, not a from-memory retelling (a claim without a check is a false proof — the reviewer catches it and returns the ticket). Set `status: review` — `done` is set by the human or the reviewer.
+7. Commits for this ticket are mandatory: small, with clear messages; secret-scan before committing; hashes go into «Результат» (pf-replan uses them for targeted rollbacks); push to the project's private remote. Journal entry (§10).
 
-- Расширять масштаб («заодно починил соседнее») — фиксируй наблюдения в «Результат»/журнал, не трогай.
-- Заявлять успех без свежего доказательства по каждому критерию.
+## Forbidden
+
+- Scope creep ("fixed the neighbor while at it") — record observations in «Результат»/journal, touch nothing.
+- Claiming success without fresh proof for every criterion.

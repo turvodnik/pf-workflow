@@ -1,24 +1,26 @@
 ---
 name: pf-tickets
-description: Разбивка утверждённого SPEC.md на самодостаточные task-пакеты в .agents/runtime/tasks/ с зависимостями и критериями приёмки. Use after SPEC approval, when user says «разбей на задачи», «декомпозиция», «/pf-tickets».
+description: Splitting an approved SPEC.md into self-contained task packets in .agents/runtime/tasks/ with dependencies and acceptance criteria. Use after SPEC approval, when user says «разбей на задачи», «декомпозиция», «/pf-tickets».
 ---
 
-# pf-tickets — из спеки в task-пакеты
+# pf-tickets — from spec to task packets
 
-Цель: превратить утверждённый SPEC.md в пакеты, каждый из которых исполним в отдельной свежей сессии без доступа к этому чату. Свежая сессия = маленький контекст = дешевле по лимитам и точнее по качеству.
+Always communicate with the user in the user's language (Russian in the origin system); packets follow the template.
 
-## Правила нарезки
+Goal: turn the approved SPEC.md into packets, each executable in a separate fresh session with no access to this chat. Fresh session = small context = cheaper on limits and more precise in quality.
 
-1. Пакет самодостаточен: исполнитель увидит ТОЛЬКО пакет + AGENTS.md проекта. Всё нужное — внутри: пути к файлам, принятые решения из спеки, ограничения.
-2. No Placeholders: никаких «допиши здесь» и «примерно так». Конкретные файлы, конкретные команды, конкретные критерии.
-3. Размер: один пакет ≤ ~2 часов работы одной сессии. Выходит больше — режь мельче.
-4. Зависимости — через `depends_on`; независимое помечай как параллелизуемое.
-5. Каждому пакету — рекомендация исполнителя: owner (claude|codex|gemini|vladimir) и класс модели (думать/проектировать — старшая; механика по готовому плану — Sonnet-класс).
-6. Критерии приёмки пакета — проверяемые командой или наблюдением; выводи их из критериев спеки.
-7. Шлюз параллельности (идея — по мотивам workflow-planner): если ≥5 тикетов взаимно независимы (нет `depends_on` друг на друга) — предложи человеку параллельный запуск вместо очереди: несколько свежих окон сразу (работает у любого агента) или стая субагентов в Claude Code. Цену назови честно: параллельно — быстрее по времени, но дороже по токенам (каждый исполнитель несёт свой контекст); очередь — дешевле, но дольше. Решает человек.
+## Slicing rules
 
-## Выход
+1. A packet is self-contained: the executor will see ONLY the packet + the project's AGENTS.md. Everything needed is inside: file paths, decisions from the spec, constraints.
+2. No placeholders: no "fill this in" or "roughly like this". Concrete files, concrete commands, concrete criteria.
+3. Size: one packet ≤ ~2 hours of one session's work. Comes out bigger — slice smaller.
+4. Dependencies — via `depends_on`; mark independent work as parallelizable.
+5. Every packet gets an executor recommendation: owner (claude|codex|gemini|vladimir) and model class (thinking/design — a senior model; mechanics against a ready plan — Sonnet-class).
+6. Packet acceptance criteria — verifiable by command or observation; derive them from the spec's criteria.
+7. Parallelism gateway (idea after workflow-planner): if ≥5 tickets are mutually independent (no `depends_on` among them) — offer the human a parallel launch instead of a queue: several fresh windows at once (works for any agent) or a subagent swarm in Claude Code. Name the price honestly: parallel — faster in wall time but more expensive in tokens (every executor carries its own context); a queue — cheaper but longer. The human decides.
 
-1. Файлы `.agents/runtime/tasks/T-###-slug.md` по `references/task-template.md` (нумерация сквозная по проекту).
-2. В SPEC.md раздел «Декомпозиция»: список пакетов с порядком.
-3. Сводка человеку: таблица (id, суть, зависит от, исполнитель), что можно параллельно, и готовая команда запуска первой партии: новая сессия → «выполни task-пакет T-00N по pf-do» — или одной командой `/pf-auto`: весь конвейер субагентами до конца (скилл pf-auto).
+## Output
+
+1. Files `.agents/runtime/tasks/T-###-slug.md` per `references/task-template.md` (numbering continuous across the project).
+2. In SPEC.md, the «Декомпозиция» section: the packet list in order.
+3. A digest for the human: a table (id, essence, depends on, executor), what can run in parallel, and the ready launch command for the first batch: new session → «выполни task-пакет T-00N по pf-do» — or with one command `/pf-auto`: the whole pipeline by subagents to the end (the pf-auto skill).

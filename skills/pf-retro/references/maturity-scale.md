@@ -1,14 +1,14 @@
-# Шкала зрелости автоматизаций (L0–L3)
+# Automation maturity scale (L0–L3)
 
-По мотивам методологии loop engineering (github.com/cobusgreyling/loop-engineering, MIT); формулировки свои.
+Inspired by the loop engineering methodology (github.com/cobusgreyling/loop-engineering, MIT); wording original.
 
-- **L0 — описано.** Есть описание цикла; ничего не запускается.
-- **L1 — отчёт.** Цикл запускается (вручную или по расписанию), но только сообщает; ничего не меняет.
-- **L2 — с подтверждением.** Цикл готовит изменения, человек подтверждает каждое применение.
-- **L3 — сам.** Применяет без подтверждения. Разрешено только при ВСЕХ условиях: явный список запретов (denylist), бюджет расходов, стоп-кран (выключается одним действием), путь эскалации к человеку, журнал прогонов.
+- **L0 — described.** The cycle is written down; nothing runs.
+- **L1 — reports.** The cycle runs (manually or on schedule) but only reports; changes nothing.
+- **L2 — with confirmation.** The cycle prepares changes; a human confirms every application.
+- **L3 — autonomous.** Applies without confirmation. Allowed only with ALL of: an explicit denylist, a spending budget, a kill switch (one action turns it off), an escalation path to a human, a run log.
 
-Правила движения:
-- Вверх — после 2 подряд чистых прогонов на текущем уровне.
-- Вниз — немедленно при инциденте или скачке стоимости.
+Movement rules:
+- Up — after 2 consecutive clean runs at the current level.
+- Down — immediately on an incident or a cost spike.
 
-Перед любой автоматизацией ответь: что цикл помнит между запусками (state)? кто проверяет результат (второй агент или человек)? когда он обязан остановиться и позвать человека?
+Before any automation answer: what does the cycle remember between runs (state)? who checks the result (a second agent or a human)? when must it stop and call a human?
