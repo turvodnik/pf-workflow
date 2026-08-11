@@ -2,6 +2,15 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.5.0 — 2026-08-11
+
+Findings from a second isolated test run (edge cases, not the happy path):
+
+- **pf-do**: work done before a blocker must now be committed too (`T-###: blocked — saving what was done`) — an uncommitted tail breaks the next gate's diff and is lost when the session changes; evidence in "Result" must be command output, not a recollection (a run produced a "4 sentences" claim where the file had 3 — the milestone gate caught it).
+- **pf-do / pf-auto**: a ticket that needs a secret is an immediate blocker — subagents and headless runs cannot call the secret helper. Such tickets are not sent through the fix loop; they are flagged "needs an interactive session" and, when known in advance, kept out of the waves entirely.
+- **pf-auto**: a working-tree hygiene check between waves.
+- Verified in the sandbox: milestone gating (one reviewer over three independent batches, caught a false claim), executor behaviour on contradictory criteria / missing source material / unavailable secrets (three correct BLOCKEDs, nothing invented), and orchestrator continuity — a successor given only the HANDOFF restored the goal, the registry, the exact next step and the blockers, and spotted the uncommitted tail the orchestrator had missed.
+
 ## v1.4.0 — 2026-08-10
 
 - **pf-auto gating is now risk-based** (`gate = auto`): a gate after every batch when batches build on each other or touch executable artifacts (code, configs, data schemas, scripts, infrastructure); a single gate per milestone when batches are independent and cheap to fix (texts, docs, standalone pages). Three gates stay mandatory in any mode: before a batch that depends on a group's results, before any external action, and the final whole-task review. The chosen mode and its reason are recorded in the run registry, so a retro can tell whether the call was right.
