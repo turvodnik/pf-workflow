@@ -7,6 +7,7 @@
 Skills rewritten in English:
 
 - All six skill instruction bodies (`pf-spec`, `pf-tickets`, `pf-do`, `pf-replan`, `pf-retro`, `pf-auto`) and the instructional references (`dispatch-templates`, `maturity-scale`) are now English — ≈35–45% fewer tokens per skill load, readable by the international audience. Trigger phrases in the descriptions stay bilingual.
+- **Descriptions lead with a Russian one-liner.** Each skill's `description` opens with a short Russian phrase ("what and why") before the English text: the origin system's human reads the skill list with his eyes, and after the English rewrite that list stopped speaking his language. `pf-retro` also gained the Russian trigger phrases it was missing. Nothing in the skill logic depends on the leading phrase — for a monolingual fork, delete it.
 - Behavior contracts unchanged: packet statuses, section names («Результат» etc.), journal format and the pf-auto dispatch-prompt protocol literals are kept verbatim. Artifact templates (`spec-template`, `task-template`, `registry-template`, `retro-template`) deliberately stay Russian — the origin system's artifacts are Russian; replace them with your language if needed. The skills now instruct the agent to answer in the user's language.
 - Verified before release: a 20-phrase Russian trigger test (2 runs before / 2 after, 80/80 match, including the §8 autopilot key phrases) and a live executor run — output language and artifact formats unchanged.
 

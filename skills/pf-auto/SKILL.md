@@ -1,6 +1,6 @@
 ---
 name: pf-auto
-description: Pipeline autopilot — after SPEC approval, execute everything to the end with subagents. Waves of 1–3 tickets, independent review at every milestone, fix cycles ≤3 with model escalation, parallelism ≤2, stops at dangerous boundaries. Use ONLY on explicit command or phrase — «/pf-auto», «сделай на автопилоте», «сделай сам всё до конца», autopilot. Never enable silently (§8).
+description: Автопилот конвейера — доделать всё до конца субагентами после утверждения спеки. Pipeline autopilot — after SPEC approval, execute everything to the end with subagents. Waves of 1–3 tickets, independent review at every milestone, fix cycles ≤3 with model escalation, parallelism ≤2, stops at dangerous boundaries. Use ONLY on explicit command or phrase — «/pf-auto», «сделай на автопилоте», «сделай сам всё до конца», autopilot. Never enable silently (§8).
 ---
 
 # pf-auto — autopilot: from approved spec to done

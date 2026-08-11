@@ -1,6 +1,6 @@
 ---
 name: pf-replan
-description: Rebuilding the spec mid-execution — a new idea or a changed decision. Impact assessment (what stays, what to rewrite, what to roll back), SPEC edit, ticket cancellation/rewrite, targeted commit rollback. Use when «изменилась идея», «передумал», «пересобери спеку», «откатись на шаг», «/pf-replan».
+description: Передумал посреди работы — пересобрать спеку и тикеты без переделки всего. Rebuilding the spec mid-execution — a new idea or a changed decision. Impact assessment (what stays, what to rewrite, what to roll back), SPEC edit, ticket cancellation/rewrite, targeted commit rollback. Use when «изменилась идея», «передумал», «пересобери спеку», «откатись на шаг», «/pf-replan».
 ---
 
 # pf-replan — changing course without losing finished work

@@ -1,6 +1,6 @@
 ---
 name: pf-do
-description: Executor contract for one task packet (ticket) in a fresh session — execute, prove by verification, commit, update status/Результат/journal. Use when asked to «выполни тикет T-###», «выполни task-пакет T-###», «возьми пакет в работу», run a task packet, execute ticket T-###.
+description: Выполнить один тикет в свежей сессии — с доказательствами и коммитом. Executor contract for one task packet (ticket) in a fresh session — execute, prove by verification, commit, update status/Результат/journal. Use when asked to «выполни тикет T-###», «выполни task-пакет T-###», «возьми пакет в работу», run a task packet, execute ticket T-###.
 ---
 
 # pf-do — executing a task packet

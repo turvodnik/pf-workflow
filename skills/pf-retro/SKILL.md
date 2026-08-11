@@ -1,6 +1,6 @@
 ---
 name: pf-retro
-description: Workflow retrospective — a digest of journals and task packets across all projects for the period, automation maturity levels L1→L3, improvement proposals with price and risk. Use when user runs «/pf-retro» или просит пересмотреть/улучшить процессы, ретро (cadence: 2 weeks → a month).
+description: Ретро процессов — что улучшить в том, как мы работаем, с ценой и риском каждой правки. Workflow retrospective — a digest of journals and task packets across all projects for the period, automation maturity levels L1→L3, improvement proposals with price and risk. Use when user runs «/pf-retro», «давай ретро», «пересмотрим процессы», «как улучшить нашу работу», «что мешает работать быстрее», или просит пересмотреть/улучшить процессы (cadence: 2 weeks → a month).
 ---
 
 # pf-retro — reviewing the workflows

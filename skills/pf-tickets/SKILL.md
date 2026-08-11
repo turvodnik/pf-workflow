@@ -1,6 +1,6 @@
 ---
 name: pf-tickets
-description: Splitting an approved SPEC.md into self-contained task packets in .agents/runtime/tasks/ with dependencies and acceptance criteria. Use after SPEC approval, when user says «разбей на задачи», «декомпозиция», «/pf-tickets».
+description: Разбить утверждённую спеку на самодостаточные задачи для исполнителей. Splitting an approved SPEC.md into self-contained task packets in .agents/runtime/tasks/ with dependencies and acceptance criteria. Use after SPEC approval, when user says «разбей на задачи», «декомпозиция», «/pf-tickets».
 ---
 
 # pf-tickets — from spec to task packets

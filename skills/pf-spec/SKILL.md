@@ -1,6 +1,6 @@
 ---
 name: pf-spec
-description: Interview before a large (L) task — step-by-step questions until full coverage, producing SPEC.md. Use when starting a large task or new project, when the user asks «сделай спеку», «спек-режим», «/pf-spec», or when scope is unclear (scale rule §7).
+description: Допрос перед большой задачей — вопросы до полного покрытия, на выходе SPEC.md. Interview before a large (L) task — step-by-step questions until full coverage, producing SPEC.md. Use when starting a large task or new project, when the user asks «сделай спеку», «спек-режим», «/pf-spec», or when scope is unclear (scale rule §7).
 ---
 
 # pf-spec — interview down to a specification
