@@ -80,14 +80,20 @@ mkdir -p "$SBHOME/.claude/skills/pf-do/scripts"
 ln -sf "$ROOT/skills/pf-do/scripts/codex-review.sh" "$SBHOME/.claude/skills/pf-do/scripts/codex-review.sh"
 
 # extract_resolver_line <file> — pulls the single-line, backtick-fenced
-# inline code span starting with `SC=$(ls` out of a markdown file (the
+# inline code span CONTAINING `SC=$(ls` out of a markdown file (the
 # resolver pattern used by pf-do/SKILL.md step 5a and pf-auto/SKILL.md's
-# Codex pre-pass). Deliberately does NOT match the multi-line fenced
-# ```bash ... ``` block in references/codex-review.md — that block documents
-# the same idea for humans but is not "a command in SKILL.md", which is the
-# literal scope of this ticket's acceptance criterion.
+# Codex pre-pass). Matches anywhere inside the span, not only at its start:
+# pf-auto/SKILL.md's span opens with a `PF_AUTO_BASE="${PF_AUTO_BASE:-}"; if
+# ...; else SC=$(ls ...` guard (T-014/F-15) — `SC=$(ls` is in the middle,
+# not the first token. `[^`]*` on both sides never crosses into a
+# neighbouring backtick span (it excludes the backtick character itself), so
+# this still can't accidentally glue two separate inline spans together.
+# Deliberately does NOT match the multi-line fenced ```bash ... ``` block in
+# references/codex-review.md — that block documents the same idea for
+# humans but is not "a command in SKILL.md", which is the literal scope of
+# this ticket's acceptance criterion.
 extract_resolver_line() {
-  grep -oE '`SC=\$\(ls[^`]*`' "$1" | head -1 | sed 's/^`//; s/`$//'
+  grep -oE '`[^`]*SC=\$\(ls[^`]*`' "$1" | head -1 | sed 's/^`//; s/`$//'
 }
 
 check_line() {
@@ -96,7 +102,11 @@ check_line() {
   repo="$(new_scratch_repo)"
   out="$( cd "$repo" && PATH="$MP" HOME="$SBHOME" "$BASH_BIN" -c "$cmd" 2>&1 )"
   rc=$?
-  if [ "$rc" = 0 ] && { printf '%s' "$out" | grep -q '^SKIP:' || printf '%s' "$out" | grep -q 'no script'; }; then
+  # Three legitimate clean-exit shapes: the plain resolver's `SKIP:` (real
+  # codex-review.sh gate) or `no script` (no installed surface), and
+  # pf-auto's guarded form's `no BASE recorded` (PF_AUTO_BASE unset in this
+  # sandbox — the correct, honest response, not a failure to detect).
+  if [ "$rc" = 0 ] && { printf '%s' "$out" | grep -q '^SKIP:' || printf '%s' "$out" | grep -q 'no script' || printf '%s' "$out" | grep -q 'no BASE recorded'; }; then
     pass "$label -> clean skip, rc=0 ($out)"
   else
     fail "$label -> rc=$rc, not a clean skip" "$out"
