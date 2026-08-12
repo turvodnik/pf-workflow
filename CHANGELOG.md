@@ -2,6 +2,16 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.7.1 — 2026-08-12
+
+Discretionary findings of the v1.7.0 independent QA, all closed:
+
+- `--yes` no longer overrides a recorded refusal: `{"enabled": false}` is a decision the human made (pf-spec writes it precisely so nobody asks again), not a missing answer. A missing file and an unreadable file are now distinguished too.
+- The report no longer dirties the working tree — the report directory carries its own `.gitignore`, so pf-auto's "the tree must be clean between waves" still holds in someone else's project.
+- Two runs in the same minute no longer overwrite each other's report (seconds in the stamp).
+- `--help` printed the first line of code; the script path is resolved across every surface the installer writes to (`~/.claude`, `~/.codex`, `~/.gemini`) instead of being pinned to `~/.claude`, so a machine without it gets a silent skip rather than a bash error; the last Russian comments in an otherwise English file are translated.
+- The watchdog now signals Codex's whole process group (`set -m`), so children no longer outlive a timeout.
+
 ## v1.7.0 — 2026-08-12
 
 Optional Codex second opinion, wired into the pipeline:

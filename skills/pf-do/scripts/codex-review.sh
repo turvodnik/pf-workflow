@@ -32,7 +32,7 @@ while [ $# -gt 0 ]; do
     --out) need_value "$1" $#; OUT="$2"; shift 2 ;;
     --yes) FORCE=1; shift ;;
     --why) need_value "$1" $#; FOCUS="$2"; shift 2 ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "SKIP: unknown argument '$1' — nothing was reviewed"; exit 0 ;;
   esac
 done
@@ -72,6 +72,11 @@ if [ -f "$CFG" ] && [ -r "$CFG" ]; then
 else
   ENABLED="false"
 fi
+if [ "$ENABLED" = "false" ] && [ -f "$CFG" ] && [ -r "$CFG" ]; then
+  # An explicit "no" is a decision, not a missing answer: --yes must not step
+  # over it. pf-spec writes {"enabled": false} exactly so nobody asks again.
+  skip "the human declined Codex review for this project (.agents/codex-review.json) — ask them again before overriding"
+fi
 if [ "$FORCE" != 1 ] && [ "$ENABLED" != "true" ]; then
   skip "Codex review not enabled for this project (.agents/codex-review.json) — ask the human once, then continue"
 fi
@@ -85,8 +90,9 @@ case "$SCOPE" in
   # "моя дока.md" no longer matches the docs filter. Two clean path lists beat
   # parsing status prefixes.
   uncommitted) FILES="$( { git -c core.quotePath=false diff --name-only -z HEAD 2>/dev/null
-                           # Отдельно индекс: в репозитории без коммитов HEAD нет,
-                           # и добавленный в индекс файл не виден ни diff, ни --others.
+                           # The index separately: a repo with no commits has no
+                           # HEAD, and a staged file is neither in the diff nor
+                           # in --others.
                            git -c core.quotePath=false diff --cached --name-only -z 2>/dev/null
                            git -c core.quotePath=false ls-files --others --exclude-standard -z 2>/dev/null
                          } | tr '\0' '\n' | sort -u )" ;;
@@ -139,16 +145,23 @@ case "$EFFORT" in
   low) TIMEOUT=150 ;; medium) TIMEOUT=300 ;; high) TIMEOUT=600 ;;
   xhigh) TIMEOUT=1200 ;; max|ultra) TIMEOUT=1800 ;;
 esac
-# PF_CODEX_TIMEOUT — ручное переопределение сторожа (тесты, отладка).
+# PF_CODEX_TIMEOUT — manual watchdog override (tests, debugging).
 case "${PF_CODEX_TIMEOUT:-}" in ''|*[!0-9]*) : ;; *) TIMEOUT="$PF_CODEX_TIMEOUT" ;; esac
 
 # --- Output file -------------------------------------------------------------
-STAMP="$(date +%Y-%m-%d-%H%M)"
+STAMP="$(date +%Y-%m-%d-%H%M%S)"
 if [ -z "$OUT" ]; then
   OUT="$REPO_ROOT/workspace/runs/codex-review/$STAMP-$SCOPE.md"
 fi
 [ -d "$OUT" ] && skip "--out points at a directory ($OUT) — give it a file path"
-mkdir -p "$(dirname "$OUT")" 2>/dev/null || skip "cannot create output directory for $OUT"
+OUT_DIR="$(dirname "$OUT")"
+mkdir -p "$OUT_DIR" 2>/dev/null || skip "cannot create output directory for $OUT"
+# Reports are working material, not deliverables: keep them out of git so the
+# tree stays clean (pf-auto step 8 requires exactly that). A local .gitignore
+# inside our own directory touches nothing the project owns.
+if [ ! -e "$OUT_DIR/.gitignore" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  printf '*\n' > "$OUT_DIR/.gitignore" 2>/dev/null || true
+fi
 : > "$OUT" 2>/dev/null || skip "cannot write the report to $OUT"
 
 # --- Run ---------------------------------------------------------------------
@@ -192,8 +205,10 @@ START="$(date +%s)"
 # No subshell wrapper: $! must be Codex itself, otherwise the watchdog kills the
 # wrapper and leaves the real process running (orphaned, still burning quota).
 cd "$REPO_ROOT" || skip "cannot enter $REPO_ROOT"
+set -m 2>/dev/null || true   # own process group for Codex → we can signal its whole tree
 codex "$@" </dev/null 2>"$ERR" >"$TMP" &
 CODEX_PID=$!
+set +m 2>/dev/null || true
 # Watchdog: Codex emits nothing until it finishes, so a hung run would block the
 # whole session. Kill it at the effort's budget and report a failure, never a
 # silent "clean".
@@ -202,20 +217,21 @@ CODEX_PID=$!
 # long after the review succeeded. Hence >/dev/null on the whole subshell.
 ( waited=0
   while [ "$waited" -lt "$TIMEOUT" ]; do
-    kill -0 "$CODEX_PID" 2>/dev/null || exit 0   # Codex закончил — сторож не нужен
+    kill -0 "$CODEX_PID" 2>/dev/null || exit 0   # Codex done — watchdog not needed
     sleep 1
     waited=$(( waited + 1 ))
   done
   kill -0 "$CODEX_PID" 2>/dev/null || exit 0
-  kill -TERM "$CODEX_PID" 2>/dev/null
+  kill -TERM "-$CODEX_PID" 2>/dev/null || kill -TERM "$CODEX_PID" 2>/dev/null
   # A process that ignores or delays SIGTERM would make the timeout advisory —
   # give it 15s to die politely, then make it non-negotiable.
   sleep 15
-  kill -0 "$CODEX_PID" 2>/dev/null && kill -KILL "$CODEX_PID" 2>/dev/null ) >/dev/null 2>&1 &
+  kill -0 "$CODEX_PID" 2>/dev/null || exit 0
+  kill -KILL "-$CODEX_PID" 2>/dev/null || kill -KILL "$CODEX_PID" 2>/dev/null ) >/dev/null 2>&1 &
 WATCHDOG=$!
 disown "$WATCHDOG" 2>/dev/null || true
-# Сообщение shell'а «Terminated: 15» при срабатывании сторожа — шум в выводе,
-# который агент передаёт человеку; глушим, статус берём из $?.
+# The shell's own "Terminated: 15" note when the watchdog fires is noise in
+# output the agent forwards to a human; silence it, the status comes from $?.
 { wait "$CODEX_PID"; RC=$?; } 2>/dev/null
 # Kill the watchdog AND its sleeping child: killing only the subshell leaves the
 # `sleep` alive for the rest of the timeout budget.
