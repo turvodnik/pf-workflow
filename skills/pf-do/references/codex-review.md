@@ -34,8 +34,11 @@ script: ~15 lines of context instead of a full review (§13).
 1. **No `codex` in PATH** → skip. Someone else's machine works exactly as before.
 2. **Not a git repo / empty diff** → skip.
 3. **No consent** — `.agents/codex-review.json` missing or `enabled:false` → skip.
-4. **Docs-only diff** (`.md`, `.json`, `.yaml`, README/CHANGELOG …) → skip;
-   Codex answers "no executable code changed" and the quota is wasted.
+4. **Docs-only diff** — prose (`.md`, `.txt`, `.rst`), images, lockfiles,
+   README/CHANGELOG/LICENSE → skip; Codex answers "no executable code changed"
+   and the quota is wasted. Configs, CI workflows and schemas (`.json`, `.yaml`,
+   `.toml`, `.sql`) are NOT docs — pf-auto counts them as executable risk, so
+   they stay in scope.
 
 ## Consent file
 
@@ -65,7 +68,7 @@ whether the value came from the config, a flag or `--deep`.
 
 ## Two review modes (the script picks for you)
 
-- **Without `--why`** — the native reviewer (`codex exec review --uncommitted|--base|--commit`). Codex frames the review itself, so our blind spot never enters the prompt. Prefer this.
+- **Without `--why`** — the native reviewer (`codex exec review --uncommitted|--base|--commit`), pinned to `sandbox_mode="read-only"`. Codex frames the review itself, so our blind spot never enters the prompt. Prefer this.
 - **With `--why "<focus>"`** — plain `codex exec` with the diff command written into the prompt. Needed because the CLI refuses a positional prompt together with any scope flag: `error: the argument '--uncommitted' cannot be used with '[PROMPT]'`. Same read-only sandbox, but the framing is now ours — use it only when you genuinely need a specific angle.
 
 ## Reading the result — three traps

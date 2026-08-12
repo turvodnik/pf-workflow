@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
     --yes) FORCE=1; shift ;;
     --why) need_value "$1" $#; FOCUS="$2"; shift 2 ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
-    *) echo "SKIP: unknown argument '$1'" >&2; exit 0 ;;
+    *) echo "SKIP: unknown argument '$1' — nothing was reviewed"; exit 0 ;;
   esac
 done
 
@@ -56,11 +56,16 @@ if [ -f "$CFG" ] && [ -r "$CFG" ]; then
     ENABLED="$(jq -r '.enabled // false' "$CFG" 2>/dev/null)"
     MODEL="$(jq -r '.model // ""' "$CFG" 2>/dev/null)"
     EFFORT="$(jq -r '.effort // ""' "$CFG" 2>/dev/null)"
+  elif command -v python3 >/dev/null 2>&1; then
+    ENABLED="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1], encoding="utf-8-sig"));print(str(d.get("enabled",False)).lower())' "$CFG" 2>/dev/null)"
+    MODEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1], encoding="utf-8-sig")).get("model",""))' "$CFG" 2>/dev/null)"
+    EFFORT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1], encoding="utf-8-sig")).get("effort",""))' "$CFG" 2>/dev/null)"
   else
-    ENABLED="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(str(d.get("enabled",False)).lower())' "$CFG" 2>/dev/null)"
-    MODEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$CFG" 2>/dev/null)"
-    EFFORT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("effort",""))' "$CFG" 2>/dev/null)"
+    # Neither reader available: say so instead of blaming the consent file.
+    skip "consent file exists but neither jq nor python3 is available to read it"
   fi
+  # "true"/"True"/"TRUE" must mean the same thing on every machine.
+  ENABLED="$(printf '%s' "$ENABLED" | tr '[:upper:]' '[:lower:]')"
 else
   ENABLED="false"
 fi
@@ -73,15 +78,20 @@ fi
 # workflows and data schemas are NOT docs — pf-auto counts them as executable
 # risk, so they stay in scope; only prose, images and lockfiles are filtered out.
 case "$SCOPE" in
-  uncommitted) FILES="$(git status --porcelain=1 --untracked-files=all | awk '{print $NF}')" ;;
+  # -z + NUL: git quotes any path containing a space or non-ASCII, and a quoted
+  # "моя дока.md" no longer matches the docs filter. Two clean path lists beat
+  # parsing status prefixes.
+  uncommitted) FILES="$( { git -c core.quotePath=false diff --name-only -z HEAD 2>/dev/null
+                           git -c core.quotePath=false ls-files --others --exclude-standard -z 2>/dev/null
+                         } | tr '\0' '\n' )" ;;
   base)        [ -n "$BASE" ] || skip "--base requires a ref"
                # Ref goes into a prompt telling Codex to run the diff command,
                # so it must be a ref git itself recognises — never free text.
                git rev-parse --verify --quiet "$BASE" >/dev/null 2>&1 || skip "unknown ref '$BASE' — nothing to review"
-               FILES="$(git diff --name-only "$BASE...HEAD" 2>/dev/null)" ;;
+               FILES="$(git -c core.quotePath=false diff --name-only -z "$BASE...HEAD" 2>/dev/null | tr '\0' '\n')" ;;
   commit)      [ -n "$COMMIT" ] || skip "--commit requires a sha"
                git rev-parse --verify --quiet "${COMMIT}^{commit}" >/dev/null 2>&1 || skip "unknown commit '$COMMIT' — nothing to review"
-               FILES="$(git show --name-only --format= "$COMMIT" 2>/dev/null)" ;;
+               FILES="$(git -c core.quotePath=false show --name-only --format= -z "$COMMIT" 2>/dev/null | tr '\0' '\n')" ;;
   *)           skip "unknown scope '$SCOPE'" ;;
 esac
 [ -n "${FILES//[[:space:]]/}" ] || skip "empty diff — nothing to review"
@@ -148,7 +158,8 @@ if [ -z "$FOCUS" ]; then
     base)        set -- "$@" --base "$BASE" ;;
     commit)      set -- "$@" --commit "$COMMIT" ;;
   esac
-  set -- "$@" -m "$MODEL" --config "model_reasoning_effort=\"$EFFORT\""
+  set -- "$@" -m "$MODEL" --config "model_reasoning_effort=\"$EFFORT\"" \
+    --config "sandbox_mode=\"read-only\""
 else
   # `codex exec review` refuses a positional prompt together with any scope flag
   # (--uncommitted / --base / --commit), so a focused pass goes through plain
@@ -180,18 +191,28 @@ CODEX_PID=$!
 # Watchdog: Codex emits nothing until it finishes, so a hung run would block the
 # whole session. Kill it at the effort's budget and report a failure, never a
 # silent "clean".
+# The watchdog MUST NOT hold this script's stdout: a caller doing RESULT=$(...)
+# reads until every writer closes the pipe, so a lingering `sleep` would hang it
+# long after the review succeeded. Hence >/dev/null on the whole subshell.
 ( sleep "$TIMEOUT"
   kill -0 "$CODEX_PID" 2>/dev/null || exit 0
   kill -TERM "$CODEX_PID" 2>/dev/null
   # A process that ignores or delays SIGTERM would make the timeout advisory —
   # give it 15s to die politely, then make it non-negotiable.
   sleep 15
-  kill -0 "$CODEX_PID" 2>/dev/null && kill -KILL "$CODEX_PID" 2>/dev/null ) &
+  kill -0 "$CODEX_PID" 2>/dev/null && kill -KILL "$CODEX_PID" 2>/dev/null ) >/dev/null 2>&1 &
 WATCHDOG=$!
+disown "$WATCHDOG" 2>/dev/null || true
 # Сообщение shell'а «Terminated: 15» при срабатывании сторожа — шум в выводе,
 # который агент передаёт человеку; глушим, статус берём из $?.
 { wait "$CODEX_PID"; RC=$?; } 2>/dev/null
-kill "$WATCHDOG" 2>/dev/null; wait "$WATCHDOG" 2>/dev/null
+# Kill the watchdog AND its sleeping child: killing only the subshell leaves the
+# `sleep` alive for the rest of the timeout budget.
+# Children first: killing the subshell reparents its `sleep` to init, and then
+# `pkill -P` can no longer find it — it would idle out the whole budget.
+pkill -P "$WATCHDOG" 2>/dev/null
+kill "$WATCHDOG" 2>/dev/null
+{ wait "$WATCHDOG"; } 2>/dev/null
 ELAPSED=$(( $(date +%s) - START ))
 
 # --- Result ------------------------------------------------------------------

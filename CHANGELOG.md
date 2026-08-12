@@ -14,6 +14,9 @@ Optional Codex second opinion, wired into the pipeline:
 
 Eight defects of the tool itself were found and fixed before release, six of them by Codex reviewing this very script: an argument without a value spun the parser forever; `--deep` did not override a fast-lane project config; configs, CI workflows and schemas were filtered out as "docs"; untracked files were invisible in focused mode; an unwritable `--out` reported "OK, 0 findings"; the watchdog sent a single SIGTERM with no follow-up kill; `-s` did not distinguish a directory from a file (a second false-clean path); and the watchdog killed a subshell wrapper instead of Codex itself.
 
+Independent QA before release added two more, both fixed: the watchdog held the script's stdout, so a caller reading the output through command substitution hung until the timeout budget expired *after* a successful review (and stray `sleep` processes piled up); and file names containing spaces or non-ASCII come back quoted from git, so the docs-only gate failed to recognise them — path lists are read with `-z` now. Also fixed: the native mode now pins `sandbox_mode="read-only"` it already claimed in the report; consent is no longer ignored with a wrong reason on a machine without both `jq` and `python3`; `"True"` in the consent file means the same everywhere; an unknown flag reports on stdout, where the caller is told to read.
+
+
 ## v1.6.1 — 2026-08-12
 
 English follow-up (discretionary findings of the v1.6.0 independent QA):
