@@ -2,6 +2,18 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+## v1.7.0 — 2026-08-12
+
+Optional Codex second opinion, wired into the pipeline:
+
+- **New: `skills/pf-do/scripts/codex-review.sh`** — a read-only review of the current diff by the local Codex CLI. The full report goes to a file (`workspace/runs/codex-review/`), only a ~6-line digest reaches the agent's context, so a review costs minutes of wall-clock and almost no window.
+- **Nothing is required.** Four silent gates, each exiting 0: no `codex` in PATH → no project consent (`.agents/codex-review.json`) → not a git repo or an empty diff → a diff with only prose and lockfiles. Without Codex installed the pipeline behaves exactly as before — that is the point, not a fallback.
+- **Hooks:** `pf-do` step 5a (before `status: review`), `pf-auto` — a pre-pass before a milestone gate (`--deep`, never replacing the reviewer subagent), `pf-spec` step 4a — the single consent question, asked while the spec is written and only when `codex` exists on the machine, `pf-handoff` step 2a (companion tool) — on closing a session that still holds uncommitted code.
+- **`pf-do/references/codex-review.md`** — the runbook: the two review modes and why a focused pass cannot use the native reviewer, the model policy (`gpt-5.6-luna`/`max` fast lane, `gpt-5.6-sol`/`xhigh` deep lane, `ultra` banned), and the traps: `codex exec review` always exits 0, an empty report means the run died, `codex exec` hangs forever without `</dev/null`.
+- **Why a reviewer that does not replace §6:** Codex frames the native review itself, so the caller's blind spot stays out of the prompt — but it runs on the same machine against the same repository. It is the cheap half of the check, not the independent audit.
+
+Eight defects of the tool itself were found and fixed before release, six of them by Codex reviewing this very script: an argument without a value spun the parser forever; `--deep` did not override a fast-lane project config; configs, CI workflows and schemas were filtered out as "docs"; untracked files were invisible in focused mode; an unwritable `--out` reported "OK, 0 findings"; the watchdog sent a single SIGTERM with no follow-up kill; `-s` did not distinguish a directory from a file (a second false-clean path); and the watchdog killed a subshell wrapper instead of Codex itself.
+
 ## v1.6.1 — 2026-08-12
 
 English follow-up (discretionary findings of the v1.6.0 independent QA):
