@@ -11,7 +11,7 @@ You are the executor of one packet. The context is minimal by design: the packet
 
 ## Steps
 
-1. Read the packet `.agents/runtime/tasks/T-###-*.md`, the project's AGENTS.md and the global rules. If any dependency in `depends_on` is not `done`/`review` — stop and report. If a task HANDOFF is kept (pf-handoff companion, §13) — honor its «Состояние» and «Не делать».
+1. Read the packet `.agents/runtime/tasks/T-###-*.md`, the project's AGENTS.md and the global rules. If any dependency in `depends_on` is not `done` — stop and report. Exception: the pf-auto orchestrator may explicitly allow starting on top of a dependency still in `review`, but only as a decision recorded in the wave registry (pf-auto step 2, with a reason) — without that recorded exception, `review` does not clear the gate, stop. If a task HANDOFF is kept (pf-handoff companion, §13) — honor its «Состояние» and «Не делать».
 2. Set `status: in_progress`, `owner: <you>`, refresh `updated`.
 3. Execute the task step by step. §11 principles: minimal targeted edits; found a bug — root cause first (systematic-debugging), then the fix. Long packet — record progress as you go (interim notes in «Результат»; with the pf-handoff companion installed — a HANDOFF checkpoint, §13) instead of hoarding it until the end: hit the window limit and the finished part must not be lost.
 4. Blocker (no access, contradiction in the task, neighboring code broken): `status: blocked`, reason in «Результат», journal entry, stop. Do NOT slip past a blocker with a silent "almost done". **Commit what was done before the blocker** («T-###: blocked — сохраняю сделанное, <причина>»): the working tree stays clean and the next session sees how far you got. The status stays until a human unblocks.

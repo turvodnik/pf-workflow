@@ -3,18 +3,21 @@
 # (T-016, F-14). Everything here runs against THIS repo's own files
 # (skills/, agents/) — never the _tools canon.
 #
-# This repo has NOT been re-synced from canon yet (that sync is T-017's
-# job). Three sub-checks below therefore find real, already-fixed-upstream
-# defects today: codex-review.sh predates T-008's safety fixes, pf-auto's
-# SKILL.md still has T-014/F-15's literal `<BASE>`, and pf-retro/SKILL.md
-# predates T-009's frontmatter quoting. Every such case is listed, one line
-# per case, in tests/known-failures-T017.txt with the reason. run.sh treats
-# those specific, listed cases as accounted for (this section still passes)
-# but turns RED on anything else: a NEW failing case not on the list, or a
-# listed case that unexpectedly starts passing (a sign canon already synced
-# and the list must be trimmed — see that file's header). `RESULT: GREEN`
-# here means "nothing unexplained is red", not "nothing is red" — read
-# known-failures-T017.txt for the difference.
+# T-017 (2026-08-13) synced canon into this repo; tests/known-failures-T017.txt
+# is empty as a result — all 28 cases it used to track (codex-review.sh
+# predating T-008's safety fixes, pf-auto's SKILL.md still holding T-014/
+# F-15's literal `<BASE>`, pf-retro/SKILL.md predating T-009's frontmatter
+# quoting) are confirmed passing on their own, not just "accounted for"
+# (see that file's header). The bookkeeping below stays wired in — it is
+# unconditional and may be needed again after a future canon fix outpaces
+# the next sync: list the resulting case, one line per case, in
+# tests/known-failures-T017.txt. run.sh treats listed cases as accounted
+# for (this section still passes) but turns RED on anything else: a NEW
+# failing case not on the list, or a listed case that unexpectedly starts
+# passing (a sign canon already synced and the list must be trimmed — see
+# that file's header). `RESULT: GREEN` here means "nothing unexplained is
+# red", not "nothing is red" — read known-failures-T017.txt for the
+# difference.
 #
 # Bash 3.2 compatible (macOS system bash floor, same constraint as every
 # other script in this family): no associative arrays, no ${var,,}, no

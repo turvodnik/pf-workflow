@@ -1,54 +1,22 @@
-# tests/known-failures-T017.txt — pf-workflow, T-016 (F-14)
+# tests/known-failures-T017.txt — pf-workflow allowlist for known-upstream-
+# fixed-but-not-yet-synced test failures (mechanism added T-016/F-14).
 #
-# Failing cases that tests/run.sh already knows about: the _tools canon
-# fixed them (T-008 codex-review.sh safety fixes; T-009 strict-YAML
-# frontmatter quoting; T-014/F-15 <BASE> -> PF_AUTO_BASE), but this
-# distribution repo has not been re-synced from canon yet — that sync is
-# T-017's job. Every line below must correspond to an ACTUAL current
-# failure of the named case; run.sh compares the live run against this file
-# case-by-case (not section-by-section) and turns RED on either direction of
-# mismatch:
-#   - a failure NOT listed here          -> unexpected regression, RED.
-#   - a line listed here that now PASSES -> stale entry (canon must have
-#     synced), RED, with instructions to delete that line.
-# Do not add a line here to silence a failure you have not root-caused as
+# Emptied 2026-08-13: T-017 synced canon into this repo, closing every case
+# this file used to track (codex-review.sh safety fixes T-008, strict-YAML
+# frontmatter quoting T-009, <BASE> -> PF_AUTO_BASE T-014/F-15). Verified as
+# a real fix, not just "accounted for": the underlying harnesses run fully
+# green on their own (codex-review-harness 59/59, yaml-strict 9/9,
+# base-exec 2/2), not merely matched against this list. Kept as an empty
+# file, not deleted — tests/run.sh's ALLOWLIST path is unconditional and the
+# mechanism may be needed again.
+#
+# If a future canon fix lands upstream before the next sync reintroduces
+# this gap, list the resulting case here again, one line per case:
+# <section><TAB><normalized case label> — section is one of
+# codex-review-harness / yaml-strict / base-exec. Case labels containing
+# pid=NNNN or elapsed=Ns are normalized by run.sh (pid=N / elapsed=Ns)
+# before comparing, since those two numbers are not deterministic run to
+# run. Do not add a line to silence a failure you have not root-caused as
 # "already fixed upstream, sync pending" — that defeats the point of this
-# file. Format: <section><TAB><normalized case label>. Case labels with a
-# pid=NNNN or elapsed=Ns are normalized by run.sh before comparing (pid=N /
-# elapsed=Ns) because those two numbers are not deterministic run to run.
-#
-# Expected to empty out entirely once T-017 syncs canon into this repo.
-
-# --- skills/pf-do/scripts/tests (codex-review.sh safety harness, T-008) ---
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=false reader=none yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=malformed reader=jq yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=malformed reader=none yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=malformed reader=python3 yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=true reader=none yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=unreadable reader=jq yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=unreadable reader=none yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)] file=unreadable reader=python3 yes=1 -> 1 call(s) (expected 0), rc=0
-codex-review-harness	[F-05: --out never touches a byte that was already there] --out onto existing FIFO -> NOT safely rejected ( SUT hung and had to be force-killed (elapsed=Ns, rc=137))
-codex-review-harness	[F-05: --out never touches a byte that was already there] --out onto existing regular file -> NOT safely rejected (codex was called (1) sha256 changed rc=0 and no SKIP: line)
-codex-review-harness	[F-05: --out never touches a byte that was already there] --out onto existing symlink to existing file -> NOT safely rejected (codex was called (1) sha256 changed rc=0 and no SKIP: line)
-codex-review-harness	[F-09: unrecognized non-empty output must read as FAIL: not reviewed, not 0 findings] stdout 'authentication failed...' + exit 0 -> got 'ok', expected 'fail-not-reviewed' (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --base with ref [evil;semi] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --base with ref [evil`tick`] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --base with ref [evil$(sub)] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --commit with ref [evil;semi] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --commit with ref [evil`tick`] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] focused mode, --commit with ref [evil$(sub)] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --base with ref [evil;semi] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --base with ref [evil`tick`] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --base with ref [evil$(sub)] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --commit with ref [evil;semi] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --commit with ref [evil`tick`] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref] native mode, --commit with ref [evil$(sub)] -> raw ref text leaked into argv no 40-hex sha found in argv (rc=0)
-codex-review-harness	[F-11: after a timeout, the whole process group is dead even without pkill on PATH] descendant still alive after timeout with no pkill on PATH (pid=N, rc=1)
-codex-review-harness	[F-19: a path containing a literal newline is refused, never phantom-split] newline-in-filename -> not safely refused (calls=1, rc=0)
-
-# --- tests/yaml-strict.sh (strict frontmatter, T-009) ---
-yaml-strict	skills/pf-retro/SKILL.md
-
-# --- tests/base-exec.sh (<BASE> placeholder, T-014/F-15) ---
-base-exec	skills/pf-auto/SKILL.md -> rc=1, not a clean skip
+# file. run.sh turns RED on either a failure not listed here (unexpected
+# regression) or a listed line that now passes (stale entry — delete it).

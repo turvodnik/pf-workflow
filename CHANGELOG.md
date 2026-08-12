@@ -2,6 +2,20 @@
 
 *[Русская версия](CHANGELOG.ru.md)*
 
+Semver: breaking changes (task-packet frontmatter contract, skill behavior contracts, `.agents/` runtime layout) = major; new features = minor; fixes = patch.
+
+## v1.8.0 — 2026-08-13
+
+Canon re-synced: a stricter dependency gate, `codex-review.sh` hardened further, plus a test suite that watches its own back.
+
+- **Dependency gate is now done-only.** `depends_on` used to clear on a dependency in `done` *or* `review`; `review` alone no longer counts — `pf-auto` may still start a job on a `review` dependency, but only as an explicit, reasoned exception recorded in the wave registry, never silently. Minor, not major: this tightens an existing safety contract (closes a gap where a ticket could start on an unreviewed dependency) the same way v1.5.0's blocked-work-must-be-committed rule did — it does not rename or remove anything a caller depends on.
+- **`codex-review.sh` hardened again** — six more findings on top of v1.7.0's eight, all closed: consent is fail-closed on every unreadable, malformed or ambiguous state of the consent file, not only a recorded `false`; `--out` now refuses a FIFO, a dangling symlink and a directory (previously just an existing file), with `noclobber` closing the check-then-write race between the refusal check and the write itself; a Codex run that exits 0 with an auth-failure/rate-limit/traceback-shaped message now reads as "not reviewed", not "0 findings"; a `--base`/`--commit` ref is resolved to a full hex commit SHA before it reaches a prompt or `argv`, so shell metacharacters legal in a git ref name (`;`, `` ` ``, `$()`) can no longer leak through; the timeout watchdog no longer races its own `wait` — bash 3.2 returns from `wait` on a disowned PID immediately, without actually waiting, which used to let a SIGTERM-resistant descendant survive past the deadline.
+- **Strict YAML frontmatter**: `pf-retro`'s `description` is quoted like its seven siblings — unquoted, `:`/`«»` inside it broke strict parsers.
+- **New: `bash tests/run.sh` + GitHub Actions CI.** One command runs `bash -n` and ShellCheck on every script, validates the workflow YAML, re-runs the `codex-review.sh` safety harness (T-008, 59 cases) and a full-canon YAML-strict frontmatter scan (T-009), checks that every `SKILL.md` resolver line is actually executable, and two negative controls (a mutated file must turn its own check red). Portable `mktemp` throughout (a BSD-only `-t <prefix>` form silently no-ops the negative controls on `ubuntu-latest`'s GNU coreutils — found and fixed before this shipped, not after).
+- `pf-spec`'s `spec-template.md` no longer hardcodes an owner name in the template body.
+
+Verified: `bash tests/run.sh` — 11/11 GREEN, and — unlike every run before this release — the three re-synced sub-harnesses (codex-review 59/59, yaml-strict 9/9, base-exec 2/2) are green on their own merits, not merely matched against `tests/known-failures-T017.txt`, which is now empty for the first time since it was introduced.
+
 ## v1.7.1 — 2026-08-12
 
 Discretionary findings of the v1.7.0 independent QA, all closed:
