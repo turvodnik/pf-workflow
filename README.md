@@ -1,6 +1,6 @@
 # pf-workflow — a spec-driven workflow toolkit for multi-agent CLI development
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases) [![tests](https://github.com/turvodnik/pf-workflow/actions/workflows/tests.yml/badge.svg)](https://github.com/turvodnik/pf-workflow/actions/workflows/tests.yml)
 
 Русская версия: [README.ru.md](README.ru.md)
 
@@ -66,6 +66,8 @@ bash install.sh          # copies skills into ~/.claude/skills (+ .codex/.gemini
 ## Development & releases
 
 The canon lives in the author's working environment (`_tools/skill-library`); changes arrive here as releases: `bash sync-from-tools.sh` → `CHANGELOG.md` → commit → tag `vX.Y.Z` → push. Ongoing work happens on the `dev` branch; `main` holds released states only. Companion standalone distribution of the context subsystem: [pf-handoff](https://github.com/turvodnik/pf-handoff).
+
+Run the test suite locally with `bash tests/run.sh` (bash 3.2+, no dependencies beyond coreutils and git; ShellCheck, python3/PyYAML and actionlint are used when present, skipped with a reason otherwise). The same command runs in CI on every push and pull request ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)). It never invokes the real Codex CLI or touches the network — a fixture stands in for `codex` throughout (see [`tests/known-failures-T017.txt`](tests/known-failures-T017.txt) for the small set of cases this repo's un-synced copies are currently, and knowingly, red on).
 
 Skill and agent instructions are in English. The rules sections and artifact templates (SPEC, task packets, registries) are Russian — the author's working language; the process design itself is language-agnostic, and the skills answer in the user's language. English translation of the rules: [docs/rules-sections.en.md](docs/rules-sections.en.md).
 

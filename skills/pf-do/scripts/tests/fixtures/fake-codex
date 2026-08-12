@@ -1,0 +1,49 @@
+#!/bin/bash
+# Test double for the real `codex` CLI. NEVER the real thing. Behavior is
+# selected entirely through env vars so one fixture file covers every
+# scenario the harness needs. Talks to no network, no provider.
+
+if [ -n "${FAKE_CODEX_ARGV_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "$FAKE_CODEX_ARGV_LOG"
+fi
+if [ -n "${FAKE_CODEX_CALL_LOG:-}" ]; then
+  printf 'called\n' >> "$FAKE_CODEX_CALL_LOG"
+fi
+
+case "${FAKE_CODEX_MODE:-success}" in
+  success)
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    because the test says so\n'
+    exit 0 ;;
+  clean)
+    printf 'Reviewed the diff. No problems found.\n'
+    exit 0 ;;
+  error-rc0)
+    # F-09 repro: provider-side failure text on stdout, CLI itself exits 0.
+    printf 'authentication failed: provider returned an error page\n'
+    exit 0 ;;
+  empty)
+    exit 0 ;;
+  crash)
+    printf 'boom\n' >&2
+    exit 1 ;;
+  hang)
+    # Never exits by itself. No trap: a group-wide TERM kills it like any
+    # ordinary process (this is the "leader dies normally" half of F-11).
+    while true; do sleep 1; done ;;
+  grandchild-survives-term)
+    # F-11 repro: fork a detached descendant that ignores SIGTERM and record
+    # its PID, then the leader itself behaves like plain "hang" (dies on a
+    # group-wide TERM, same as above).
+    # $BASHPID (the subshell's own PID) is bash 4+; this fixture must run
+    # under bash 3.2 (macOS system /bin/bash, what `env bash` resolves to
+    # here). $! read by the PARENT right after backgrounding is portable.
+    ( trap '' TERM
+      while true; do sleep 1; done ) &
+    GC_PID=$!
+    printf '%s\n' "$GC_PID" > "$FAKE_CODEX_GRANDCHILD_PID_FILE"
+    disown "$GC_PID" 2>/dev/null || true
+    while true; do sleep 1; done ;;
+  *)
+    echo "fake-codex: unknown FAKE_CODEX_MODE '${FAKE_CODEX_MODE:-}'" >&2
+    exit 99 ;;
+esac

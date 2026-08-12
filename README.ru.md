@@ -1,6 +1,6 @@
 # pf-workflow — конвейер рабочих процессов для мульти-агентной разработки
 
-[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Релиз](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases)
+[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Релиз](https://img.shields.io/github/v/release/turvodnik/pf-workflow)](https://github.com/turvodnik/pf-workflow/releases) [![тесты](https://github.com/turvodnik/pf-workflow/actions/workflows/tests.yml/badge.svg)](https://github.com/turvodnik/pf-workflow/actions/workflows/tests.yml)
 
 English overview: [README.md](README.md)
 
@@ -66,6 +66,8 @@ bash install.sh          # копии скиллов в ~/.claude/skills (+ .cod
 ## Разработка и релизы
 
 Канон живёт в рабочей среде автора (`_tools/skill-library`); сюда изменения приходят релизами: `bash sync-from-tools.sh` → `CHANGELOG.md` → commit → tag `vX.Y.Z` → push. Доработки ведутся в ветке `dev`, в `main` — только отрелизенные состояния. Родственный отдельный дистрибутив подсистемы контекста: [pf-handoff](https://github.com/turvodnik/pf-handoff).
+
+Прогнать тесты локально: `bash tests/run.sh` (bash 3.2+, без зависимостей сверх coreutils и git; ShellCheck, python3/PyYAML и actionlint используются, если есть, иначе пропускаются с указанием причины). Та же команда — в CI на каждый push и pull request ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)). Настоящий Codex CLI не вызывается никогда и сеть не используется — вместо `codex` везде фикстура (см. [`tests/known-failures-T017.txt`](tests/known-failures-T017.txt) — короткий список случаев, где несинкованные с каноном копии в этом репозитории сейчас осознанно красные).
 
 Инструкции скиллов и агентов — на английском (дешевле по токенам). Правила и шаблоны артефактов (SPEC, task-пакеты, реестры) — русские, язык рабочей среды автора; скиллы отвечают на языке пользователя. Английский перевод правил: [docs/rules-sections.en.md](docs/rules-sections.en.md).
 
