@@ -150,8 +150,15 @@ case "${PF_CODEX_TIMEOUT:-}" in ''|*[!0-9]*) : ;; *) TIMEOUT="$PF_CODEX_TIMEOUT"
 
 # --- Output file -------------------------------------------------------------
 STAMP="$(date +%Y-%m-%d-%H%M%S)"
+OWN_DIR=0
 if [ -z "$OUT" ]; then
   OUT="$REPO_ROOT/workspace/runs/codex-review/$STAMP-$SCOPE.md"
+  OWN_DIR=1   # only our own default directory may get a .gitignore
+fi
+if [ "$OWN_DIR" = 1 ] && [ -e "$OUT" ]; then
+  n=2
+  while [ -e "${OUT%.md}-$n.md" ]; do n=$(( n + 1 )); done
+  OUT="${OUT%.md}-$n.md"
 fi
 [ -d "$OUT" ] && skip "--out points at a directory ($OUT) — give it a file path"
 OUT_DIR="$(dirname "$OUT")"
@@ -159,7 +166,7 @@ mkdir -p "$OUT_DIR" 2>/dev/null || skip "cannot create output directory for $OUT
 # Reports are working material, not deliverables: keep them out of git so the
 # tree stays clean (pf-auto step 8 requires exactly that). A local .gitignore
 # inside our own directory touches nothing the project owns.
-if [ ! -e "$OUT_DIR/.gitignore" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ "$OWN_DIR" = 1 ] && [ ! -e "$OUT_DIR/.gitignore" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   printf '*\n' > "$OUT_DIR/.gitignore" 2>/dev/null || true
 fi
 : > "$OUT" 2>/dev/null || skip "cannot write the report to $OUT"
@@ -226,7 +233,8 @@ set +m 2>/dev/null || true
   # A process that ignores or delays SIGTERM would make the timeout advisory —
   # give it 15s to die politely, then make it non-negotiable.
   sleep 15
-  kill -0 "$CODEX_PID" 2>/dev/null || exit 0
+  # No "is the leader still alive" check here: the leader may be gone while a
+  # child that ignored SIGTERM lives on. The group gets SIGKILL either way.
   kill -KILL "-$CODEX_PID" 2>/dev/null || kill -KILL "$CODEX_PID" 2>/dev/null ) >/dev/null 2>&1 &
 WATCHDOG=$!
 disown "$WATCHDOG" 2>/dev/null || true
