@@ -39,7 +39,10 @@ fi
 
 # --- collect target files ---------------------------------------------------
 
-FILES_LIST="$(mktemp -t yaml-strict-files)"
+# Portable form: GNU mktemp (Linux, incl. ubuntu-latest) rejects a bare
+# `-t <prefix>` ("too few X's in template"); BSD mktemp (macOS) accepts it.
+# An explicit template with X's works identically on both (verified T-016).
+FILES_LIST="$(mktemp "${TMPDIR:-/tmp}/yaml-strict-files.XXXXXXXX")"
 trap 'rm -f "$FILES_LIST"' EXIT
 
 find "$ROOT/skills" -name 'SKILL.md' -print > "$FILES_LIST"

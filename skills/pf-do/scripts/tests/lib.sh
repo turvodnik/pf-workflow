@@ -22,8 +22,11 @@ GROUP_PASS=0
 GROUP_FAIL=0
 GROUP_SUMMARY=()
 
-LEAK_PID_FILE="$(mktemp -t codex-review-tests-leaks)"
-CLEANUP_DIRS_FILE="$(mktemp -t codex-review-tests-dirs)"
+# Portable form: GNU mktemp (Linux, incl. ubuntu-latest) rejects a bare
+# `-t <prefix>` ("too few X's in template"); BSD mktemp (macOS) accepts it.
+# An explicit template with X's works identically on both (verified T-016).
+LEAK_PID_FILE="$(mktemp "${TMPDIR:-/tmp}/codex-review-tests-leaks.XXXXXXXX")"
+CLEANUP_DIRS_FILE="$(mktemp "${TMPDIR:-/tmp}/codex-review-tests-dirs.XXXXXXXX")"
 
 group() {
   # Close the previous group's tally before opening a new one.
@@ -172,7 +175,7 @@ make_minpath_no_codex() {
 # new_repo — an isolated git repo with one commit, cwd left inside it.
 new_repo() {
   local d
-  d="$(mktemp -d -t codex-review-test-repo)"
+  d="$(mktemp -d "${TMPDIR:-/tmp}/codex-review-test-repo.XXXXXXXX")"
   echo "$d" >> "$CLEANUP_DIRS_FILE"
   ( cd "$d" && PATH="$FULL_PATH" git init -q \
       && PATH="$FULL_PATH" git config user.email test@example.com \

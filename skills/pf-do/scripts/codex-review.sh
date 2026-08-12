@@ -204,8 +204,12 @@ followed by an indented explanation. P1 = breaks or endangers something, P2 =
 real defect, P3 = worth fixing. Report nothing you cannot point to in the diff."
 fi
 
-TMP="$(mktemp -t codex-review)" || skip "cannot create temp file"
-ERR="$(mktemp -t codex-review-err)" || skip "cannot create temp file"
+# Portable form: GNU mktemp (Linux, incl. ubuntu-latest and Linux/WSL users
+# of this skill) rejects a bare `-t <prefix>` ("too few X's in template");
+# BSD mktemp (macOS) accepts it. An explicit template with X's works
+# identically on both (verified T-016; same fix applied upstream in canon).
+TMP="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXXXX")" || skip "cannot create temp file"
+ERR="$(mktemp "${TMPDIR:-/tmp}/codex-review-err.XXXXXXXX")" || skip "cannot create temp file"
 START="$(date +%s)"
 # stderr goes to a file rather than /dev/null: it holds the reasoning stream we
 # do not want in the report, but also the only explanation when a run dies.

@@ -12,7 +12,10 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="${PF_CODEX_REVIEW_SCRIPT:-$TESTS_DIR/../codex-review.sh}"
 [ -f "$SUT" ] || { echo "cannot find SUT at $SUT"; exit 90; }
 
-WORKROOT="$(mktemp -d -t codex-review-tests-work)"
+# Portable form: GNU mktemp (Linux, incl. ubuntu-latest) rejects a bare
+# `-t <prefix>` ("too few X's in template"); BSD mktemp (macOS) accepts it.
+# An explicit template with X's works identically on both (verified T-016).
+WORKROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-review-tests-work.XXXXXXXX")"
 echo "$WORKROOT" >> "$CLEANUP_DIRS_FILE"
 
 echo "codex-review.sh test suite"
@@ -77,7 +80,7 @@ f04_case() {
       chmod 000 "$repo/.agents/codex-review.json"
       ;;
   esac
-  local calllog; calllog="$(mktemp -t codex-review-test-calllog)"
+  local calllog; calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
   local args
   args=(--scope uncommitted)
   [ "$yes_flag" = 1 ] && args+=(--yes)
@@ -118,7 +121,7 @@ f05_reject() {
   local before_hash="" before_target=""
   if [ -f "$target" ]; then before_hash="$(sha256_of "$target")"; fi
   if [ -L "$target" ]; then before_target="$(readlink "$target")"; fi
-  local calllog; calllog="$(mktemp -t codex-review-test-calllog)"
+  local calllog; calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
   local out rc t0 t1 elapsed
   t0=$(date +%s)
   out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out "$target" 2>&1 )"
@@ -174,7 +177,7 @@ repo="$(new_repo)"
 consent_file "$repo" '{"enabled": true}'
 echo "x=1" > "$repo/change.sh"
 target="$repo/brand-new-report.md"
-calllog="$(mktemp -t codex-review-test-calllog)"
+calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
 out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out "$target" 2>&1 )"
 rc=$?
 calls=0
@@ -231,7 +234,7 @@ f10_case() {
       && PATH="$FULL_PATH" git add seed.sh \
       && PATH="$FULL_PATH" git commit -qm second >/dev/null 2>&1 )
   consent_file "$repo" '{"enabled": true}'
-  local argvlog; argvlog="$(mktemp -t codex-review-test-argvlog)"
+  local argvlog; argvlog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-argvlog.XXXXXXXX")"
   local extra_args=()
   [ "$mode" = why ] && extra_args+=(--why "test focus")
   local out rc
@@ -297,7 +300,7 @@ group "F-19: a path containing a literal newline is refused, never phantom-split
 repo="$(new_repo)"
 consent_file "$repo" '{"enabled": true}'
 ( cd "$repo" && printf 'code' > $'weird\nname.sh' && PATH="$FULL_PATH" git add -- $'weird\nname.sh' )
-calllog="$(mktemp -t codex-review-test-calllog)"
+calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
 out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted 2>&1 )"
 rc=$?
 calls=0
@@ -313,7 +316,7 @@ rm -f "$calllog"; rm -rf "$repo"
 repo="$(new_repo)"
 consent_file "$repo" '{"enabled": true}'
 ( cd "$repo" && printf 'code' > "мой файл.sh" && PATH="$FULL_PATH" git add -- "мой файл.sh" )
-calllog="$(mktemp -t codex-review-test-calllog)"
+calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
 out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted 2>&1 )"
 rc=$?
 calls=0

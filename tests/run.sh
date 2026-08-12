@@ -58,7 +58,17 @@ cleanup() {
   for d in "${CLEANUP_DIRS[@]+"${CLEANUP_DIRS[@]}"}"; do [ -n "$d" ] && [ -d "$d" ] && rm -rf "$d"; done
 }
 trap cleanup EXIT
-mktempdir() { local d; d=$(mktemp -d -t pfwf-tests); CLEANUP_DIRS+=("$d"); printf '%s' "$d"; }
+
+# Portable temp helpers: GNU mktemp (Linux, incl. ubuntu-latest — the CI
+# runner this suite ships for) rejects `-t <prefix>` unless <prefix> itself
+# contains literal X's ("too few X's in template"); BSD mktemp (macOS, this
+# suite's other target) accepts a bare prefix and appends randomness itself.
+# An explicit template with X's is accepted, identically, by both. Verified
+# on macOS and in `ubuntu:24.04` (docker) before relying on it everywhere.
+pf_mktemp_file() { mktemp "${TMPDIR:-/tmp}/$1.XXXXXXXX"; }
+pf_mktemp_dir()  { mktemp -d "${TMPDIR:-/tmp}/$1.XXXXXXXX"; }
+
+mktempdir() { local d; d=$(pf_mktemp_dir pfwf-tests); CLEANUP_DIRS+=("$d"); printf '%s' "$d"; }
 
 # ===========================================================================
 # --- reusable sweeps (parameterized by root, so the negative control below
@@ -70,7 +80,7 @@ list_sh_files() { find "$1" -name '*.sh' -not -path '*/.git/*' | sort; }
 
 bash_n_sweep() {
   local root="$1" f bad=0 n=0 err
-  err=$(mktemp -t pfwf-bashn-err)
+  err=$(pf_mktemp_file pfwf-bashn-err)
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     n=$((n + 1))
@@ -144,14 +154,14 @@ normalize_labels() {
 check_against_allowlist() {
   local section="$1" actual_raw="$2"
   local expected_raw norm_actual norm_expected unexpected stale
-  expected_raw=$(mktemp -t pfwf-allow-expected)
+  expected_raw=$(pf_mktemp_file pfwf-allow-expected)
   if [ -f "$ALLOWLIST" ]; then
     grep -F "$section$(printf '\t')" "$ALLOWLIST" 2>/dev/null | sed "s/^$section$(printf '\t')//" > "$expected_raw"
   else
     : > "$expected_raw"
   fi
-  norm_actual=$(mktemp -t pfwf-allow-actual-n); normalize_labels "$actual_raw" > "$norm_actual"
-  norm_expected=$(mktemp -t pfwf-allow-expected-n); normalize_labels "$expected_raw" > "$norm_expected"
+  norm_actual=$(pf_mktemp_file pfwf-allow-actual-n); normalize_labels "$actual_raw" > "$norm_actual"
+  norm_expected=$(pf_mktemp_file pfwf-allow-expected-n); normalize_labels "$expected_raw" > "$norm_expected"
 
   unexpected=$(comm -23 "$norm_actual" "$norm_expected")
   stale=$(comm -13 "$norm_actual" "$norm_expected")
@@ -179,7 +189,7 @@ group "codex-review.sh safety harness (skills/pf-do/scripts/tests, T-008)"
 # ===========================================================================
 cr_out=$("$BASH_BIN" "$ROOT/skills/pf-do/scripts/tests/run.sh" 2>&1)
 echo "$cr_out"
-cr_raw=$(mktemp -t pfwf-cr-raw)
+cr_raw=$(pf_mktemp_file pfwf-cr-raw)
 printf '%s\n' "$cr_out" | grep '^  - ' | sed 's/^  - //' > "$cr_raw"
 check_against_allowlist "codex-review-harness" "$cr_raw"
 rm -f "$cr_raw"
@@ -189,7 +199,7 @@ group "yaml-strict.sh (skills/*/SKILL.md + agents/*.md frontmatter, T-009)"
 # ===========================================================================
 ys_out=$("$BASH_BIN" "$TESTS_DIR/yaml-strict.sh" 2>&1)
 echo "$ys_out"
-ys_raw=$(mktemp -t pfwf-ys-raw)
+ys_raw=$(pf_mktemp_file pfwf-ys-raw)
 printf '%s\n' "$ys_out" | grep '^FAIL: ' | sed "s|^FAIL: $ROOT/||" > "$ys_raw"
 check_against_allowlist "yaml-strict" "$ys_raw"
 rm -f "$ys_raw"
@@ -199,7 +209,7 @@ group "base-exec.sh (<BASE>-executability of SKILL.md resolver commands, T-014/F
 # ===========================================================================
 be_out=$("$BASH_BIN" "$TESTS_DIR/base-exec.sh" 2>&1)
 echo "$be_out"
-be_raw=$(mktemp -t pfwf-be-raw)
+be_raw=$(pf_mktemp_file pfwf-be-raw)
 printf '%s\n' "$be_out" | grep '^  - ' | sed 's/^  - //' > "$be_raw"
 check_against_allowlist "base-exec" "$be_raw"
 rm -f "$be_raw"

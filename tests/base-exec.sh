@@ -47,7 +47,16 @@ cleanup() {
   for d in "${CLEANUP_DIRS[@]+"${CLEANUP_DIRS[@]}"}"; do [ -n "$d" ] && [ -d "$d" ] && rm -rf "$d"; done
 }
 trap cleanup EXIT
-mktempdir() { local d; d=$(mktemp -d -t pfwf-base-exec); CLEANUP_DIRS+=("$d"); printf '%s' "$d"; }
+
+# Portable temp dir: GNU mktemp (Linux, incl. ubuntu-latest — the CI runner
+# this suite ships for) rejects `-t <prefix>` unless <prefix> itself
+# contains literal X's ("too few X's in template"); BSD mktemp (macOS, this
+# suite's other target) accepts a bare prefix and appends randomness itself.
+# An explicit template with X's is accepted, identically, by both. Verified
+# on macOS and in `ubuntu:24.04` (docker) before relying on it here — a
+# silent empty $MP from a failed mktemp would make EVERY curated-PATH
+# symlink below resolve to "/$t" instead of a real sandboxed tool.
+mktempdir() { local d; d=$(mktemp -d "${TMPDIR:-/tmp}/pfwf-base-exec.XXXXXXXX"); CLEANUP_DIRS+=("$d"); printf '%s' "$d"; }
 
 # --- curated PATH: fixed toolset, codex NEVER on it -------------------------
 BASE_TOOLS="bash git printf tr grep date dirname mkdir sed cat rm mktemp sort wc head tail sleep basename ls"
