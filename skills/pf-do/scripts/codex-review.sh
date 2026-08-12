@@ -60,6 +60,9 @@ if [ -f "$CFG" ] && [ -r "$CFG" ]; then
     ENABLED="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1], encoding="utf-8-sig"));print(str(d.get("enabled",False)).lower())' "$CFG" 2>/dev/null)"
     MODEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1], encoding="utf-8-sig")).get("model",""))' "$CFG" 2>/dev/null)"
     EFFORT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1], encoding="utf-8-sig")).get("effort",""))' "$CFG" 2>/dev/null)"
+  elif [ "$FORCE" = 1 ]; then
+    # --yes means the human just asked for this run: no reader needed.
+    ENABLED="true"
   else
     # Neither reader available: say so instead of blaming the consent file.
     skip "consent file exists but neither jq nor python3 is available to read it"
@@ -82,8 +85,11 @@ case "$SCOPE" in
   # "моя дока.md" no longer matches the docs filter. Two clean path lists beat
   # parsing status prefixes.
   uncommitted) FILES="$( { git -c core.quotePath=false diff --name-only -z HEAD 2>/dev/null
+                           # Отдельно индекс: в репозитории без коммитов HEAD нет,
+                           # и добавленный в индекс файл не виден ни diff, ни --others.
+                           git -c core.quotePath=false diff --cached --name-only -z 2>/dev/null
                            git -c core.quotePath=false ls-files --others --exclude-standard -z 2>/dev/null
-                         } | tr '\0' '\n' )" ;;
+                         } | tr '\0' '\n' | sort -u )" ;;
   base)        [ -n "$BASE" ] || skip "--base requires a ref"
                # Ref goes into a prompt telling Codex to run the diff command,
                # so it must be a ref git itself recognises — never free text.
@@ -98,7 +104,7 @@ esac
 
 CODE_FILES="$(printf '%s\n' "$FILES" \
   | grep -vE '\.(md|markdown|txt|rst|adoc|csv|svg|png|jpe?g|gif|webp|pdf|lock)$' \
-  | grep -vE '(^|/)(CHANGELOG|README|LICENSE|NOTICE)' \
+  | grep -vE '(^|/)(CHANGELOG|README|LICENSE|NOTICE)(\.[A-Za-z]+)?$' \
   | grep -vE '(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|composer\.lock)$' \
   | grep -vE '(^|/)\.agents/(codex-review|context-budget)\.json$' || true)"
 if [ -z "${CODE_FILES//[[:space:]]/}" ]; then
@@ -194,7 +200,12 @@ CODEX_PID=$!
 # The watchdog MUST NOT hold this script's stdout: a caller doing RESULT=$(...)
 # reads until every writer closes the pipe, so a lingering `sleep` would hang it
 # long after the review succeeded. Hence >/dev/null on the whole subshell.
-( sleep "$TIMEOUT"
+( waited=0
+  while [ "$waited" -lt "$TIMEOUT" ]; do
+    kill -0 "$CODEX_PID" 2>/dev/null || exit 0   # Codex закончил — сторож не нужен
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
   kill -0 "$CODEX_PID" 2>/dev/null || exit 0
   kill -TERM "$CODEX_PID" 2>/dev/null
   # A process that ignores or delays SIGTERM would make the timeout advisory —
