@@ -282,6 +282,30 @@ f09_case crash fail-not-reviewed "nonzero exit (pre-existing contract)"
 f09_case clean-security-prose ok "clean review whose prose says 'rate limit' + 'authentication failed' (I-022, must NOT become a false FAIL)"
 f09_case error-rc0 fail-not-reviewed "short unstructured 'authentication failed' stdout (I-022 regression guard for F-09)"
 
+# I-031 (T-023): the length gate above stops a raw error dump from being
+# flagged once it runs past ERR_SHAPE_LINES/ERR_SHAPE_CHARS — measured on
+# these exact three shapes by the T-020 gate (T-023 context). The
+# structural, length-independent check must catch all three.
+f09_case traceback fail-not-reviewed "python traceback, 6 lines/281 bytes — over the length gate, still a raw error (I-031)"
+f09_case html-error fail-not-reviewed "HTML error page, 8 lines/185 bytes — over the length gate, still a raw error (I-031)"
+f09_case html-error-minified fail-not-reviewed "minified HTML error page, one line/307 bytes — over the length gate, still a raw error (I-031)"
+
+# I-031 regression guard: a genuine clean review that QUOTES a traceback
+# line / HTML prefix / JSON error envelope inside its own prose (not as the
+# raw output's opening line) must stay OK. This is the trap named in the
+# T-023 packet: "no [P1]/[P2]/[P3] markers -> not a report" is false, an
+# honest clean review has none by definition — these three fixtures prove
+# the structural check does not fall into it.
+f09_case clean-quotes-traceback ok "clean review whose prose quotes a traceback line as an example (I-031, must NOT become a false FAIL)"
+f09_case clean-quotes-html ok "clean review whose prose quotes an HTML doctype prefix as an example (I-031, must NOT become a false FAIL)"
+f09_case clean-quotes-json-error ok "clean review whose prose quotes a JSON error envelope as an example (I-031, must NOT become a false FAIL)"
+
+# T-020 gate hygiene: pin the ERR_SHAPE_CHARS boundary itself so raising it
+# later cannot slip past unnoticed (previously only a fixture that clears
+# it with room to spare — clean-security-prose, 382 bytes — existed).
+f09_case boundary-chars-at fail-not-reviewed "word-signature output at exactly ERR_SHAPE_CHARS (300 bytes) -> still gated in (off-by-one, T-020 hygiene)"
+f09_case boundary-chars-over ok "word-signature output one byte past ERR_SHAPE_CHARS (301 bytes) -> gated out, not structural either (off-by-one, T-020 hygiene)"
+
 # ===========================================================================
 group "F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref"
 # ===========================================================================

@@ -32,6 +32,84 @@ case "${FAKE_CODEX_MODE:-success}" in
     # F-09 repro: provider-side failure text on stdout, CLI itself exits 0.
     printf 'authentication failed: provider returned an error page\n'
     exit 0 ;;
+  traceback)
+    # I-031 repro: a real Python traceback, 6 lines / 281 bytes — over the
+    # length-only F-09 threshold (ERR_SHAPE_LINES=3 / ERR_SHAPE_CHARS=300),
+    # so the length gate alone waves it through as "0 findings, clean".
+    printf 'Traceback (most recent call last):\n'
+    printf '  File "/app/provider_client.py", line 142, in call\n'
+    printf '    resp = self._session.post(url, json=payload, timeout=30)\n'
+    printf '  File "/usr/lib/python3.11/site-packages/requests/sessions.py", line 637, in post\n'
+    printf '    return self.request("POST", url, data=data, json=json, **kwargs)\n'
+    printf 'requests.exceptions.ConnectionError: HTTPSConnectionPool: Max retries exceeded\n'
+    exit 0 ;;
+  html-error)
+    # I-031 repro: an HTML error page, 8 lines / 185 bytes — also over the
+    # length-only threshold.
+    printf '<!DOCTYPE html>\n<html>\n<head><title>502 Bad Gateway</title></head>\n'
+    printf '<body>\n<center><h1>502 Bad Gateway</h1></center>\n'
+    printf '<hr><center>nginx</center>\n</body>\n</html>\n'
+    exit 0 ;;
+  html-error-minified)
+    # I-031 repro: the same page collapsed to one line, padded past
+    # ERR_SHAPE_CHARS (300) on purpose — this is the exact shape the T-023
+    # gate measured (343 bytes) slipping through on length alone. Padded
+    # with digits (not another failure word) so this case actually
+    # exercises the structural, length-independent detector and is not
+    # incidentally caught by the length-gated FAILURE_SIGNATURE word list
+    # too, which would make it a weaker regression guard.
+    _html='<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx/1.24.0</center></body></html><!-- trace id '
+    printf -v _pad '%*s' 130 ''
+    printf '%s%s -->\n' "$_html" "${_pad// /0}"
+    exit 0 ;;
+  clean-quotes-traceback)
+    # I-031 regression guard: a genuine, clean, structured review whose
+    # prose discusses error handling and QUOTES a traceback line/HTML tag
+    # as an example, but does not itself begin with one. Must stay OK — the
+    # trap named in T-023: "no [P1]/[P2]/[P3] markers -> not a report" is
+    # false, an honest clean review has none by definition.
+    printf 'Reviewed the diff across 3 files covering the retry wrapper around the\n'
+    printf 'provider client.\n\n'
+    printf 'Summary:\nThe wrapper catches the case where the upstream call raises an error\n'
+    printf 'whose repr starts with "Traceback (most recent call last):" and logs it\n'
+    printf 'at WARNING before retrying, which matches the existing test fixtures.\n\n'
+    printf 'No problems found. This review is complete.\n'
+    exit 0 ;;
+  clean-quotes-html)
+    printf 'Reviewed the diff across 2 files covering the error-page renderer.\n\n'
+    printf 'Summary:\nWhen the upstream 5xx bubbles up, the handler wraps the body in a\n'
+    printf 'minimal template beginning with `<!DOCTYPE html><html>...` before\n'
+    printf 'sending it back to the caller, and unit tests assert on that literal\n'
+    printf 'prefix. Error mapping otherwise matches the existing 4xx/5xx table.\n\n'
+    printf 'No problems found. This review is complete.\n'
+    exit 0 ;;
+  clean-quotes-json-error)
+    printf 'Reviewed the diff across 2 files covering the JSON error envelope.\n\n'
+    printf 'Summary:\nOn failure the API now serializes the standard `{"error": ...}`\n'
+    printf 'envelope with a stable "code" field, matching the schema the client\n'
+    printf 'already expects, and the added tests cover the 4xx/5xx boundary.\n\n'
+    printf 'No problems found. This review is complete.\n'
+    exit 0 ;;
+  boundary-chars-at)
+    # T-023 gate hygiene: pin the ERR_SHAPE_CHARS boundary itself, not just
+    # a fixture that clears it with room to spare. Exactly ERR_SHAPE_CHARS
+    # (300) bytes total, one line, matches the word signature -> must FAIL.
+    # If ERR_SHAPE_CHARS is ever raised without noticing, this case alone
+    # won't catch it (it would still be <= a larger threshold) but its
+    # boundary-chars-over sibling below will.
+    # Builds the padding with bash builtins only (printf -v + parameter
+    # expansion) — `seq` is deliberately absent from the curated test PATH
+    # (F-11's BASE_TOOLS) and this fixture must run under it.
+    printf -v _pad '%*s' 276 ''
+    printf 'authentication failed: %s\n' "${_pad// /x}"
+    exit 0 ;;
+  boundary-chars-over)
+    # One byte past ERR_SHAPE_CHARS (301), same single line, same word
+    # signature -> must NOT fail on length alone (word-signature path is
+    # gated out); still not a structural match either -> OK.
+    printf -v _pad '%*s' 277 ''
+    printf 'authentication failed: %s\n' "${_pad// /x}"
+    exit 0 ;;
   empty)
     exit 0 ;;
   crash)

@@ -425,6 +425,35 @@ if [ "$TOTAL" = 0 ] && [ "$RAW_LINES" -le "$ERR_SHAPE_LINES" ] \
   exit 1
 fi
 
+# I-031: the length gate above (needed to stop I-022's over-firing on
+# ordinary prose) has a cost — a raw error dump that happens to run past
+# ERR_SHAPE_LINES/ERR_SHAPE_CHARS slips through as "0 findings, clean" even
+# though it is still just an error, not a review. A python traceback, an
+# HTML error page, and its minified one-line form were all measured doing
+# exactly this (T-023 gate). Length is the wrong signal for these three —
+# what actually marks them is that the raw output OPENS with the error's
+# own envelope instead of review prose. So this check is structural and
+# position-anchored to the first non-empty line, not a body-wide word
+# search, and it applies at ANY length — no ERR_SHAPE_LINES/CHARS gate.
+#
+# Why anchoring to the first line and not "no [P1]/[P2]/[P3] markers": an
+# honest, genuinely clean review has no markers by definition — treating
+# "no findings" as "not a report" would flip F-09 inside out and fail every
+# clean review. A review's prose can also legitimately QUOTE a traceback
+# line or an HTML tag as an example without the raw output ITSELF being
+# that traceback/page — that case must stay OK, and staying OK is exactly
+# what anchoring to the first line buys: quoted text never lands on line 1
+# of a report that opens with its own sentence.
+STRUCT_SIGNATURE='^[[:space:]]*(Traceback \(most recent call last\):|<!DOCTYPE[[:space:]]+html|<html[ >]|\{"error"[[:space:]]*:|HTTP/1\.[01][[:space:]]+[45][0-9][0-9])'
+RAW_FIRST_LINE="$(printf '%s\n' "$RAW_BODY" | grep -m1 '.' || true)"
+if [ "$TOTAL" = 0 ] \
+   && printf '%s' "$RAW_FIRST_LINE" | grep -qiE "$STRUCT_SIGNATURE"; then
+  echo "FAIL: not reviewed — Codex exited 0 with no findings, and the raw output opens with the shape of a traceback/HTML/JSON error envelope, not review prose."
+  echo "REPORT: $OUT (raw output kept for inspection)"
+  printf '%s\n' "$RAW_BODY" | head -3
+  exit 1
+fi
+
 echo "OK: Codex review finished in ${ELAPSED}s ($MODEL/$EFFORT, $CODE_COUNT code files)"
 echo "REPORT: $OUT"
 echo "FINDINGS: P1=$P1 P2=$P2 P3=$P3 (total $TOTAL)"
