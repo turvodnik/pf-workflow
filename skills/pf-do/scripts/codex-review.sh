@@ -375,6 +375,13 @@ if [ ! -f "$OUT" ] || [ ! -s "$OUT" ]; then
   rm -f "$TMP" "$ERR"
   exit 1
 fi
+# Shape of the raw stdout, captured before it's deleted below — the F-09
+# heuristic further down needs to tell a terse provider error from genuine
+# review prose, and both live only in $TMP (the header wrapped into $OUT is
+# ours, not Codex's).
+RAW_LINES=$(grep -c . "$TMP" 2>/dev/null || true)
+RAW_CHARS=$(wc -c < "$TMP" 2>/dev/null | tr -d ' ')
+RAW_BODY="$(cat "$TMP")"
 rm -f "$TMP" "$ERR"
 
 # Only list lines count: Codex repeats markers in its intro paragraph, and the
@@ -388,15 +395,33 @@ TOTAL=$(( P1 + P2 + P3 ))
 # provider/CLI failure that lands on stdout (auth errors, rate limits, a
 # crashed sub-process) previously read as "0 findings" — indistinguishable
 # from a genuinely clean review. Zero findings AND text that matches a known
-# failure signature is reclassified as "not reviewed", never "clean". This
-# is a disclosed heuristic, not a formal contract with the provider: it
-# catches the concrete failure shapes seen in practice, not everything that
-# could ever go wrong — read the report when a result looks surprising.
+# failure signature is reclassified as "not reviewed", never "clean".
+#
+# I-022: the word list alone over-fired — a genuine review of code that
+# handles auth or rate limiting uses these exact words in its own prose and
+# got a false FAIL. Fix is shape, not more words: a real provider/CLI failure
+# is short and unstructured (one line, no report), a real review — even a
+# clean one — reads longer. So the signature only counts when the RAW output
+# is both terse (<= ERR_SHAPE_LINES non-empty lines, <= ERR_SHAPE_CHARS
+# characters) AND matches a signature; a longer or multi-line block that
+# happens to contain these words is left alone. Disclosed heuristic, not a
+# formal contract: it catches the concrete failure shapes seen in practice
+# (short stdout dumps), not everything that could go wrong — an extremely
+# short genuine review that itself uses one of these words can still
+# misfire, and a verbose multi-paragraph provider error can now slip past;
+# read the report when a result looks surprising.
 FAILURE_SIGNATURE='(^|[^A-Za-z])(auth(entication)?[ _-]?fail(ed|ure)?|unauthori[sz]ed|forbidden|rate[ -]?limit(ed)?|quota[ -]?exceeded|invalid[ _-]?api[ _-]?key|no such (model|provider)|(connection|network) (refused|reset|error)|internal server error|bad gateway|service unavailable|gateway timeout|request timed out|traceback \(most recent call last\)|unhandled exception|panic:|fatal error)([^A-Za-z]|$)'
-if [ "$TOTAL" = 0 ] && grep -qiE "$FAILURE_SIGNATURE" "$OUT"; then
-  echo "FAIL: not reviewed — Codex exited 0 with no findings, but the output matches a known error/failure pattern, not a completed review."
+ERR_SHAPE_LINES=3
+ERR_SHAPE_CHARS=300
+RAW_LINES="${RAW_LINES:-0}"; RAW_CHARS="${RAW_CHARS:-0}"
+case "$RAW_LINES" in ''|*[!0-9]*) RAW_LINES=0 ;; esac
+case "$RAW_CHARS" in ''|*[!0-9]*) RAW_CHARS=0 ;; esac
+if [ "$TOTAL" = 0 ] && [ "$RAW_LINES" -le "$ERR_SHAPE_LINES" ] \
+   && [ "$RAW_CHARS" -le "$ERR_SHAPE_CHARS" ] \
+   && printf '%s\n' "$RAW_BODY" | grep -qiE "$FAILURE_SIGNATURE"; then
+  echo "FAIL: not reviewed — Codex exited 0 with no findings, and the short, unstructured output matches a known error/failure pattern, not a completed review."
   echo "REPORT: $OUT (raw output kept for inspection)"
-  grep -iE "$FAILURE_SIGNATURE" "$OUT" | head -3
+  printf '%s\n' "$RAW_BODY" | grep -iE "$FAILURE_SIGNATURE" | head -3
   exit 1
 fi
 

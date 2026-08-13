@@ -274,6 +274,13 @@ f09_case clean ok "genuine 'no problems found' text (must NOT become a false FAI
 f09_case success ok "genuine findings present (baseline)"
 f09_case empty fail-not-reviewed "empty output + exit 0 (pre-existing contract)"
 f09_case crash fail-not-reviewed "nonzero exit (pre-existing contract)"
+# I-022: F-09's own fix over-fired on genuine review prose about auth/rate
+# limiting. A clean review that legitimately uses these words, but is long
+# and structured (not shaped like a terse provider error), must read OK —
+# while a genuinely short, unstructured provider failure using the same
+# words must still read as fail-not-reviewed (regression guard for F-09).
+f09_case clean-security-prose ok "clean review whose prose says 'rate limit' + 'authentication failed' (I-022, must NOT become a false FAIL)"
+f09_case error-rc0 fail-not-reviewed "short unstructured 'authentication failed' stdout (I-022 regression guard for F-09)"
 
 # ===========================================================================
 group "F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref"

@@ -17,6 +17,17 @@ case "${FAKE_CODEX_MODE:-success}" in
   clean)
     printf 'Reviewed the diff. No problems found.\n'
     exit 0 ;;
+  clean-security-prose)
+    # I-022 repro: a genuine, clean review of auth/rate-limit code — long,
+    # structured prose that legitimately uses the same words F-09's
+    # signature watches for. Must NOT be reclassified as a provider failure.
+    printf 'Reviewed the diff across 4 files focused on the new auth middleware.\n\n'
+    printf 'Summary:\nThe middleware correctly rejects a request when authentication failed\n'
+    printf 'upstream, returning 401 without leaking details. It also enforces a rate\n'
+    printf 'limit of 100 requests per minute per API key, and the counter resets on\n'
+    printf 'schedule as expected under the added tests.\n\n'
+    printf 'No problems found. This review is complete.\n'
+    exit 0 ;;
   error-rc0)
     # F-09 repro: provider-side failure text on stdout, CLI itself exits 0.
     printf 'authentication failed: provider returned an error page\n'
