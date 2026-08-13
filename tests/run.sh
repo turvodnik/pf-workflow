@@ -128,13 +128,24 @@ group "GitHub Actions workflow YAML is valid"
 WF="$ROOT/.github/workflows/tests.yml"
 if [ ! -f "$WF" ]; then
   fail "tests.yml not found at $WF"
-elif ! command -v python3 >/dev/null 2>&1; then
-  echo "SKIP  python3 not available — cannot strict-parse the workflow YAML"
 else
-  if err=$(python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))" "$WF" 2>&1); then
-    pass "tests.yml parses as valid YAML"
+  # Two independent sub-checks (strict-parse, actionlint) with separate
+  # tools: neither's absence may swallow the other (T-017 fix round, 🔴 B).
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "SKIP  python3 not available — cannot strict-parse the workflow YAML"
+  elif ! python3 -c "import yaml" >/dev/null 2>&1; then
+    # python3 present, PyYAML missing: the stock python3 on ubuntu-24.04 and
+    # on macOS's Command Line Tools both lack it. Previously this fell
+    # through to the strict-parse below, which raised ModuleNotFoundError
+    # and reported "tests.yml is not valid YAML" — blaming a valid file for
+    # a missing third-party module, contradicting this exact SKIP contract.
+    echo "SKIP  PyYAML not installed (python3 -c 'import yaml' failed) — cannot strict-parse the workflow YAML"
   else
-    fail "tests.yml is not valid YAML" "$err"
+    if err=$(python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))" "$WF" 2>&1); then
+      pass "tests.yml parses as valid YAML"
+    else
+      fail "tests.yml is not valid YAML" "$err"
+    fi
   fi
   if command -v actionlint >/dev/null 2>&1; then
     if out=$(actionlint "$WF" 2>&1); then pass "actionlint clean"; else fail "actionlint finding(s)" "$out"; fi
@@ -187,44 +198,76 @@ check_against_allowlist() {
   rm -f "$expected_raw" "$norm_actual" "$norm_expected"
 }
 
+# require_subharness_ran <label> <rc> <output> -- a sub-harness that exits 0
+# (clean) or 1 (some FAIL lines, which check_against_allowlist compares to
+# the allowlist next) completed a real run. Anything else (e.g. 90 = setup
+# aborted before any case ran — missing jq/python3 — or yaml-strict's 2 =
+# "NOT VERIFIED, no YAML-capable interpreter") means it never finished: it
+# has no per-case FAIL labels to check against the allowlist, so skipping
+# straight to check_against_allowlist would compare two empty lists and
+# print "fully green" for a sub-harness that verified nothing (T-017 fix
+# round, 🟡 C — reproduced: renaming one resolver-line marker made
+# base-exec.sh exit 90 with zero cases run, and the suite still read
+# TOTAL 11/11 GREEN because nothing here ever looked at $?).
+require_subharness_ran() {
+  local label="$1" rc="$2" out="$3"
+  if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then
+    fail "$label: sub-harness aborted before finishing (rc=$rc) — not run, not green" "$(printf '%s' "$out" | tail -3)"
+    return 1
+  fi
+  return 0
+}
+
 # ===========================================================================
 group "codex-review.sh safety harness (skills/pf-do/scripts/tests, T-008)"
 # ===========================================================================
-cr_out=$("$BASH_BIN" "$ROOT/skills/pf-do/scripts/tests/run.sh" 2>&1)
+cr_out=$("$BASH_BIN" "$ROOT/skills/pf-do/scripts/tests/run.sh" 2>&1); cr_rc=$?
 echo "$cr_out"
-cr_raw=$(pf_mktemp_file pfwf-cr-raw)
-printf '%s\n' "$cr_out" | grep '^  - ' | sed 's/^  - //' > "$cr_raw"
-check_against_allowlist "codex-review-harness" "$cr_raw"
-rm -f "$cr_raw"
+if require_subharness_ran "codex-review-harness" "$cr_rc" "$cr_out"; then
+  cr_raw=$(pf_mktemp_file pfwf-cr-raw)
+  printf '%s\n' "$cr_out" | grep '^  - ' | sed 's/^  - //' > "$cr_raw"
+  check_against_allowlist "codex-review-harness" "$cr_raw"
+  rm -f "$cr_raw"
+fi
 
 # ===========================================================================
 group "yaml-strict.sh (skills/*/SKILL.md + agents/*.md frontmatter, T-009)"
 # ===========================================================================
-ys_out=$("$BASH_BIN" "$TESTS_DIR/yaml-strict.sh" 2>&1)
+ys_out=$("$BASH_BIN" "$TESTS_DIR/yaml-strict.sh" 2>&1); ys_rc=$?
 echo "$ys_out"
-ys_raw=$(pf_mktemp_file pfwf-ys-raw)
-printf '%s\n' "$ys_out" | grep '^FAIL: ' | sed "s|^FAIL: $ROOT/||" > "$ys_raw"
-check_against_allowlist "yaml-strict" "$ys_raw"
-rm -f "$ys_raw"
+if require_subharness_ran "yaml-strict" "$ys_rc" "$ys_out"; then
+  ys_raw=$(pf_mktemp_file pfwf-ys-raw)
+  printf '%s\n' "$ys_out" | grep '^FAIL: ' | sed "s|^FAIL: $ROOT/||" > "$ys_raw"
+  check_against_allowlist "yaml-strict" "$ys_raw"
+  rm -f "$ys_raw"
+fi
 
 # ===========================================================================
 group "base-exec.sh (<BASE>-executability of SKILL.md resolver commands, T-014/F-15)"
 # ===========================================================================
-be_out=$("$BASH_BIN" "$TESTS_DIR/base-exec.sh" 2>&1)
+be_out=$("$BASH_BIN" "$TESTS_DIR/base-exec.sh" 2>&1); be_rc=$?
 echo "$be_out"
-be_raw=$(pf_mktemp_file pfwf-be-raw)
-printf '%s\n' "$be_out" | grep '^  - ' | sed 's/^  - //' > "$be_raw"
-check_against_allowlist "base-exec" "$be_raw"
-rm -f "$be_raw"
+if require_subharness_ran "base-exec" "$be_rc" "$be_out"; then
+  be_raw=$(pf_mktemp_file pfwf-be-raw)
+  printf '%s\n' "$be_out" | grep '^  - ' | sed 's/^  - //' > "$be_raw"
+  check_against_allowlist "base-exec" "$be_raw"
+  rm -f "$be_raw"
+fi
 
 # ===========================================================================
 group "No real network calls, no real codex CLI reachable in this suite"
 # ===========================================================================
 # curl/wget: zero tolerance anywhere under tests/ or the transplanted
 # harness — nothing here should ever be ABLE to touch the network. Excludes
-# run.sh itself: this very check's pattern text would otherwise self-match.
+# THIS file only, by its exact absolute path: this very check's pattern
+# text would otherwise self-match. A bare `.../run\.sh:` (any directory)
+# used to exclude every basename run.sh, including the real, in-scope
+# child at $CR_TESTS/run.sh — a curl/wget added there would have escaped
+# this tripwire forever, even though README promises it "never touches the
+# network" for the exact command that runs that child (T-017 fix round,
+# 🟡 E).
 CR_TESTS="$ROOT/skills/pf-do/scripts/tests"
-net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v '^[^:]*/run\.sh:' || true)
+net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v "^$TESTS_DIR/run\.sh:" || true)
 if [ -z "$net_hits" ]; then
   pass "grep -rnE 'curl|wget' tests/ + skills/pf-do/scripts/tests/ (excluding run.sh itself) -> no matches"
 else
