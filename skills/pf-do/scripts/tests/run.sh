@@ -344,7 +344,13 @@ rc=$?
 gc_pid=""
 [ -s "$gcfile" ] && gc_pid="$(cat "$gcfile")"
 if [ -n "$gc_pid" ]; then track_leak_pid "$gc_pid"; fi
-if [ -n "$gc_pid" ] && ! kill -0 "$gc_pid" 2>/dev/null; then
+# pid_is_alive (lib.sh), not a plain `kill -0`: a killed descendant is a
+# zombie until *something* reaps it, and `kill -0` alone reads a zombie as
+# "alive". On a bare PID 1 that never calls wait() (docker run without
+# --init) that zombie can persist for the container's whole life, turning
+# this case falsely red even though the watchdog's SIGKILL genuinely ended
+# it — confirmed empirically both ways (see pid_is_alive's comment).
+if [ -n "$gc_pid" ] && ! pid_is_alive "$gc_pid"; then
   pass "SIGTERM-resistant descendant is dead after timeout, no pkill on PATH (rc=$rc)"
 else
   fail "descendant still alive after timeout with no pkill on PATH (pid=$gc_pid, rc=$rc)" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|')"

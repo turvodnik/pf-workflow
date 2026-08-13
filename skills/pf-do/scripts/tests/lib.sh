@@ -194,12 +194,54 @@ consent_file() {
 
 track_leak_pid() { printf '%s\n' "$1" >> "$LEAK_PID_FILE"; }
 
+# pid_is_alive <pid> — true only if <pid> genuinely exists AND is not a
+# zombie (defunct, state Z). A descendant killed by SIGKILL is fully
+# terminated the instant the signal lands, but its process-table slot
+# survives — as a zombie — until whatever it gets reparented to (normally
+# PID 1 of the container) calls wait() on it. Plain `kill -0` cannot tell
+# the difference: a zombie still answers "yes, this pid exists", so it
+# reads as "alive". Under a shell running as PID 1 this is usually
+# invisible (a shell blocked in its own `wait` tends to reap unrelated
+# adopted zombies too, as a side effect of draining SIGCHLD) — confirmed
+# empirically to happen in single-digit milliseconds. Under a genuinely
+# idle PID 1 that never calls wait() at all (a bare `docker run` without
+# --init, minimal images, etc.) nothing ever reaps it, and the zombie
+# — confirmed empirically to persist for the life of the container —
+# would forever read as "alive" without this check. Reaping an orphan
+# that is not even its own child is not something the watchdog in
+# codex-review.sh can do (see its F-11 comment); this is a defect in how
+# the TEST tells "dead" from "not running but not reaped yet", not in the
+# product. Portable: bash 3.2, Linux (/proc) + macOS (ps); falls back to
+# plain kill -0 semantics if neither source of process state is available.
+pid_is_alive() {
+  local pid="$1"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1   # gone outright -> not alive
+  local state="" raw
+  if [ -r "/proc/$pid/stat" ]; then
+    # Linux: "pid (comm) state ...". comm can itself contain spaces or
+    # parens, so split on the LAST ") " rather than the first space.
+    raw="$(cat "/proc/$pid/stat" 2>/dev/null)"
+    raw="${raw##*) }"
+    set -- $raw
+    state="${1:-}"
+  else
+    raw="$(ps -o state= -p "$pid" 2>/dev/null)"
+    set -- $raw
+    state="${1:-}"
+  fi
+  case "$state" in
+    ''|Z*) return 1 ;;  # unknown (already gone) or zombie/defunct -> not alive
+    *)     return 0 ;;
+  esac
+}
+
 sweep_leaks() {
   local leaked=0
   if [ -s "$LEAK_PID_FILE" ]; then
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
-      if kill -0 "$pid" 2>/dev/null; then
+      if pid_is_alive "$pid"; then
         kill -KILL "$pid" 2>/dev/null || true
         leaked=$((leaked + 1))
       fi
