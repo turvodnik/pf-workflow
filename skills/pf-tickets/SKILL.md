@@ -16,7 +16,7 @@ Goal: turn the approved SPEC.md into packets, each executable in a separate fres
 3. Size: one packet ≤ ~2 hours of one session's work. Comes out bigger — slice smaller.
 4. Dependencies — via `depends_on`; mark independent work as parallelizable.
 5. Every packet gets an executor recommendation: owner (claude|codex|gemini|vladimir) and model class (thinking/design — a senior model; mechanics against a ready plan — Sonnet-class).
-6. Packet acceptance criteria — verifiable by command or observation; derive them from the spec's criteria.
+6. Packet acceptance criteria — verifiable by command or observation; derive them from the spec's criteria. Pinning a criterion to where a report ends? Write «последний содержательный раздел» (last substantive section), not «заканчивается X» (ends with X) — the mandatory mini-glossary (§0) makes itself the literal last section of any long report, so «ends with X» stops being satisfiable the moment X isn't the glossary.
 7. Parallelism gateway (idea after workflow-planner): if ≥5 tickets are mutually independent (no `depends_on` among them) — offer the human a parallel launch instead of a queue: several fresh windows at once (works for any agent) or a subagent swarm in Claude Code. Name the price honestly: parallel — faster in wall time but more expensive in tokens (every executor carries its own context); a queue — cheaper but longer. The human decides.
 
 ## Output

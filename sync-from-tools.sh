@@ -22,6 +22,20 @@ for ag in pf-architect pf-executor pf-reviewer; do
   cp "$TOOLS/skill-library/agents/$ag.md" "$HERE/agents/$ag.md"
 done
 
+# tests/yaml-strict.sh (T-009, I-004): this repo's own test suite
+# (tests/run.sh, T-016) runs it against skills/*/SKILL.md + agents/*.md
+# frontmatter, but nothing carried it forward on sync — it had only ever
+# been transplanted by hand (T-016), same class of drift risk fixed for
+# pf-handoff's threshold-parity.sh (T-017). No path adaptation needed here
+# (unlike that file): source and destination are both tests/yaml-strict.sh.
+# Fail closed on the source so a moved/renamed canon file stops the sync
+# instead of silently leaving a stale copy in place.
+YS_SRC="$TOOLS/skill-library/tests/yaml-strict.sh"
+[ -f "$YS_SRC" ] || { echo "ОШИБКА: не найден $YS_SRC" >&2; exit 2; }
+mkdir -p "$HERE/tests"
+cp "$YS_SRC" "$HERE/tests/yaml-strict.sh"
+chmod +x "$HERE/tests/yaml-strict.sh"
+
 mkdir -p "$HERE/docs"
 {
   echo "# Готовые разделы правил для вашего AGENTS.md / CLAUDE.md"
