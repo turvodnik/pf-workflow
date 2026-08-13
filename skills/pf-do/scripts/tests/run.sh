@@ -189,6 +189,63 @@ else
 fi
 rm -f "$calllog"; rm -rf "$repo"
 
+# Regression (T-017 fix round, found by the workflow pilot, not by this
+# harness — every case above always ran with `cd "$repo"` + an absolute
+# --out, so none of them could see this): a RELATIVE --out must resolve
+# against the cwd the script was invoked from, not against $REPO_ROOT after
+# the internal `cd` further down in the SUT. Two sibling cases share one
+# setup: a precious file at repo ROOT (must never be touched by a run from
+# a SUBDIRECTORY) and an empty subdirectory to invoke from.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+printf 'PRECIOUS-DO-NOT-CLOBBER\n' > "$repo/victim.md"
+root_hash_before="$(sha256_of "$repo/victim.md")"
+mkdir -p "$repo/sub"
+# The uncommitted change lives INSIDE sub/, not at repo root: `git
+# ls-files --others` (unlike `diff`/`status`) scopes to the invocation cwd
+# and below when given no pathspec, so a root-level untracked file is
+# invisible to the SUT once it cd's into sub/ — that would read as "SKIP:
+# empty diff" and never reach the --out code path this case exists to
+# exercise. Independent of the F-05 bug under test; noted, not fixed here.
+echo "x=1" > "$repo/sub/change.sh"
+
+# 2a. $repo/sub/victim.md does NOT exist yet: a relative `--out victim.md`
+# must resolve to THAT (new) path, not to $repo/victim.md — so the run
+# proceeds normally (OK, not SKIP: absolutizing is not a blanket refusal)
+# and the root-level file is never touched.
+calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
+out="$( cd "$repo/sub" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out victim.md 2>&1 )"
+rc=$?
+calls=0
+[ -s "$calllog" ] && calls="$(grep -c . "$calllog" 2>/dev/null || true)"
+root_hash_after="$(sha256_of "$repo/victim.md")"
+if [ "$calls" = 1 ] && [ "$root_hash_after" = "$root_hash_before" ] && [ -s "$repo/sub/victim.md" ]; then
+  pass "relative --out from a subdirectory -> resolves next to the caller (sub/victim.md), \$REPO_ROOT/victim.md untouched (rc=$rc)"
+else
+  fail "relative --out from a subdirectory -> did not resolve against the invocation cwd (calls=$calls, rc=$rc, root file changed=$([ "$root_hash_after" = "$root_hash_before" ] && echo no || echo YES))" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|')"
+fi
+rm -f "$calllog"
+
+# 2b. Same setup, but $repo/sub/victim.md (the RESOLVED path) already
+# exists too: the F-05 guard must reject it there, same as any other
+# pre-existing --out, and leave BOTH copies untouched.
+printf 'SUBDIR-PRECIOUS-TOO\n' > "$repo/sub/victim.md"
+sub_hash_before="$(sha256_of "$repo/sub/victim.md")"
+calllog="$(mktemp "${TMPDIR:-/tmp}/codex-review-test-calllog.XXXXXXXX")"
+out="$( cd "$repo/sub" && sut_run 10 "$MP_JQ" "FAKE_CODEX_CALL_LOG=$calllog" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out victim.md 2>&1 )"
+rc=$?
+calls=0
+[ -s "$calllog" ] && calls="$(grep -c . "$calllog" 2>/dev/null || true)"
+root_hash_after2="$(sha256_of "$repo/victim.md")"
+sub_hash_after="$(sha256_of "$repo/sub/victim.md")"
+if [ "$calls" = 0 ] && [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '^SKIP:' \
+   && [ "$root_hash_after2" = "$root_hash_before" ] && [ "$sub_hash_after" = "$sub_hash_before" ]; then
+  pass "relative --out from a subdirectory onto an existing sub/victim.md -> SKIP (F-05), both copies untouched (rc=$rc)"
+else
+  fail "relative --out from a subdirectory onto an existing sub/victim.md -> NOT safely rejected (calls=$calls, rc=$rc)" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|')"
+fi
+rm -f "$calllog"; rm -rf "$repo"
+
 # ===========================================================================
 group "F-09: unrecognized non-empty output must read as FAIL: not reviewed, not 0 findings"
 # ===========================================================================

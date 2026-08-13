@@ -223,6 +223,19 @@ if [ -z "$OUT" ]; then
   OUT="$REPO_ROOT/workspace/runs/codex-review/$STAMP-$SCOPE.md"
   OWN_DIR=1   # only our own default directory may get a .gitignore
 fi
+# A relative --out must be absolutized HERE, before the guard below and
+# before `cd "$REPO_ROOT"` further down (F-05 fix-round, T-017 workflow
+# pilot): the guard's existence check and the noclobber test-write both run
+# in the invocation cwd, but the real write at the bottom of this script
+# happens after the cd. Left relative, those two resolve against different
+# directories — the guard protects one file while a plain truncating `>`
+# silently clobbers a different one, behind a reported "OK". Absolutizing
+# once, right after OUT is decided, makes every later use of $OUT — guard,
+# mkdir, the final write — agree on the same path regardless of the cd.
+case "$OUT" in
+  /*) : ;;                 # already absolute (also true for the default above)
+  *)  OUT="$PWD/$OUT" ;;   # relative to the cwd the script was invoked from
+esac
 if [ "$OWN_DIR" = 1 ]; then
   if [ -e "$OUT" ] || [ -L "$OUT" ]; then
     n=2
