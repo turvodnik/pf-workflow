@@ -383,6 +383,25 @@ f09_case marker-backticks ok "marker in backticks on a clean review -> recognise
 f09_case marker-underscores ok "marker in underscores on a clean review -> recognised as a sign-off"
 f09_case marker-leading-zero ok "marker count written '01' with one finding -> leading zero is formatting, not a mismatch"
 
+# T-024 gate, round 2: the rest of the markdown dressing. The first round gave
+# the tolerance to emphasis only — and to `* MARKER` by accident, while
+# `- MARKER` failed with a message blaming truncation. An obedient sign-off must
+# not be refused for its wrapper, whichever wrapper the model picked.
+f09_case marker-bold-label ok "marker with only the label in bold ('**...:** 0') -> emphasis in mid-line is still a sign-off"
+f09_case marker-list-dash ok "marker as a '-' list item -> a sign-off, like the '*' bullet already was"
+f09_case marker-quote ok "marker as a '>' blockquote -> a sign-off"
+f09_case marker-heading ok "marker as a '##' heading -> a sign-off"
+# The other half of the same asymmetry: the finding COUNTER must tolerate what
+# the marker tolerates, or an obedient review is refused as a count desync.
+f09_case finding-bold-severity ok "finding with bold severity ('- **[P1]** ...') + correct marker ': 1' -> counted, no false desync"
+f09_case finding-indented ok "indented finding ('  - [P2] ...') + correct marker ': 1' -> counted, no false desync"
+# Counter forms: formatting of the number is not a disagreement about it, but a
+# number that cannot be read at all is.
+f09_case marker-count-zeros ok "marker count written '000' on a clean review -> zero is zero"
+f09_case marker-count-trailing-space ok "marker count with a trailing space -> still a sign-off"
+f09_case marker-count-plus fail-not-reviewed "marker count '+1' -> unreadable count, FAIL (safe direction)"
+f09_case marker-count-word fail-not-reviewed "marker count spelled 'one' -> unreadable count, FAIL (safe direction)"
+
 # T-024 gate: a lowercase token is not the contract, but the message must not
 # claim there is no marker at all.
 repo="$(new_repo)"
@@ -393,6 +412,22 @@ if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed' && printf '%s' "$out" | 
   pass "lowercase marker -> FAIL whose message names the case, not 'no marker at all' (rc=$rc)"
 else
   fail "lowercase marker -> unexpected (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
+fi
+rm -rf "$repo"
+
+# Same discipline for a malformed count: the verdict was always right, the
+# reason printed was not — an intact token with ': 1.0' was reported as output
+# that "ends mid-marker".
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=marker-count-malformed" -- --scope uncommitted 2>&1 )"; rc=$?
+if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed' \
+   && printf '%s' "$out" | grep -qi 'malformed' \
+   && ! printf '%s' "$out" | grep -qi 'ends mid-marker'; then
+  pass "marker ': 1.0' -> FAIL whose message blames the count, not a truncated tail (rc=$rc)"
+else
+  fail "marker ': 1.0' -> unexpected (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
 fi
 rm -rf "$repo"
 
@@ -425,7 +460,22 @@ i033_note_case findings-no-marker ok "marker missing but two well-formed finding
 # Emergency relief valve: the marker stops being the verdict, the second
 # echelon decides again — loudly, and at the stated price.
 i033_note_case clean-no-marker ok "PF_CODEX_SENTINEL_OPTIONAL=1: clean review without a marker -> OK again, with a loud NOTE" "PF_CODEX_SENTINEL_OPTIONAL=1"
-i033_note_case error-rc0 fail-not-reviewed "PF_CODEX_SENTINEL_OPTIONAL=1: a known failure shape is still caught by the second echelon" "PF_CODEX_SENTINEL_OPTIONAL=1"
+# Two rows, because the valve's veto has two sides and the old single row named
+# itself after both while covering one. `error-rc0` carries NO finding line
+# (TOTAL=0); the html/json pair carries one (TOTAL>0) — and it was TOTAL>0 that
+# used to walk into OK before the veto was ever consulted.
+i033_note_case error-rc0 fail-not-reviewed "PF_CODEX_SENTINEL_OPTIONAL=1, no findings: a known failure shape is still vetoed by the second echelon" "PF_CODEX_SENTINEL_OPTIONAL=1"
+i033_note_case gate-html-with-finding fail-not-reviewed "PF_CODEX_SENTINEL_OPTIONAL=1, WITH a finding line: the 502 shape is still vetoed (the valve waives the marker, not the veto)" "PF_CODEX_SENTINEL_OPTIONAL=1"
+i033_note_case gate-json-with-finding fail-not-reviewed "PF_CODEX_SENTINEL_OPTIONAL=1, WITH a finding line: the JSON error envelope is still vetoed" "PF_CODEX_SENTINEL_OPTIONAL=1"
+# The valve's documented PRICE, kept honest from the other direction: these two
+# carry positive evidence of truncation and no known failure shape, so the valve
+# does swallow them. If that ever changes, the doc's price paragraph is wrong.
+i033_note_case sentinel-count-mismatch ok "PF_CODEX_SENTINEL_OPTIONAL=1: a count desync is swallowed -> OK + NOTE (the documented price)" "PF_CODEX_SENTINEL_OPTIONAL=1"
+# Case-insensitive, like the consent branch: a valve that ignores `TRUE` is a
+# valve someone will believe they opened.
+i033_note_case clean-no-marker ok "PF_CODEX_SENTINEL_OPTIONAL=TRUE: uppercase value opens the valve too" "PF_CODEX_SENTINEL_OPTIONAL=TRUE"
+i033_note_case clean-no-marker ok "PF_CODEX_SENTINEL_OPTIONAL=Yes: mixed-case value opens the valve too" "PF_CODEX_SENTINEL_OPTIONAL=Yes"
+i033_note_case truncated-marker ok "PF_CODEX_SENTINEL_OPTIONAL=1: a mid-token cut is swallowed -> OK + NOTE (the documented price)" "PF_CODEX_SENTINEL_OPTIONAL=1"
 
 # ===========================================================================
 group "I-033 negative control: strip the marker requirement from the prompt -> honest fixtures must go red"

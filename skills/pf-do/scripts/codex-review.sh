@@ -401,9 +401,19 @@ rm -f "$TMP" "$ERR"
 
 # Only list lines count: Codex repeats markers in its intro paragraph, and the
 # header above is ours — counting those would inflate the tally.
-P1=$(grep -cE '^[-*] +\[P1\]' "$OUT" || true)
-P2=$(grep -cE '^[-*] +\[P2\]' "$OUT" || true)
-P3=$(grep -cE '^[-*] +\[P3\]' "$OUT" || true)
+#
+# The tolerance here must match the tolerance granted to the marker below, and
+# for the same reason: markdown dressing is the likeliest thing a real model
+# does to an obedient line. The T-024 gate found the asymmetry — `- **[P1]**
+# missing rollback — example.sh:3` with a CORRECT marker `: 1` was read as a
+# count desync ("typically a truncated report"), i.e. an obedient review was
+# refused for its formatting. So: leading indentation, any of the three list
+# bullets, and emphasis around the severity token all count as the same line.
+# What is still required is the positive part — a bullet and a bracketed
+# severity — because that is what makes the line a finding rather than prose.
+P1=$(grep -cE '^[[:space:]]*[-*+] +[*_`]*\[P1\]' "$OUT" || true)
+P2=$(grep -cE '^[[:space:]]*[-*+] +[*_`]*\[P2\]' "$OUT" || true)
+P3=$(grep -cE '^[[:space:]]*[-*+] +[*_`]*\[P3\]' "$OUT" || true)
 TOTAL=$(( P1 + P2 + P3 ))
 
 # --- The verdict: proof of review, not absence of error signs (I-033) --------
@@ -466,13 +476,24 @@ not_reviewed() {
   exit 1
 }
 
-# Markdown emphasis around the sign-off is the most likely thing a real model
-# does to it (`**CODEX-REVIEW-COMPLETE: 1**`, or the line in backticks). That is
-# an obedient marker in a wrapper, not a missing one, so the edges of every line
-# are stripped of `*`, `_` and backticks before the marker is looked for. The
-# stripped view is used ONLY for marker detection — never for counting findings,
-# whose lines legitimately begin with `*`.
-NORM_BODY="$(printf '%s\n' "$RAW_BODY" | sed -E 's/^[[:space:]]*[*_`]+[[:space:]]*//; s/[[:space:]]*[*_`]+[[:space:]]*$//')"
+# Markdown dressing around the sign-off is the most likely thing a real model
+# does to it (`**CODEX-REVIEW-COMPLETE: 1**`, the line in backticks, as a list
+# item, quoted, or as a heading). That is an obedient marker in a wrapper, not a
+# missing one. Two passes, in this order:
+#   1. every emphasis character is deleted anywhere on the line — edge-stripping
+#      alone missed `**CODEX-REVIEW-COMPLETE:** 1`, where the pair sits in the
+#      MIDDLE, and that shape was refused with a message blaming truncation;
+#   2. a leading run of block markers (`>` quote, `#` heading, `-`/`+`/`*` list
+#      bullet) is dropped — the T-024 gate found the accidental asymmetry that
+#      `* MARKER` passed while `- MARKER` failed, purely because the old edge
+#      strip happened to include `*` and not `-`.
+# This view is used ONLY for marker detection — never for counting findings,
+# whose lines legitimately begin with a bullet and carry `[P1]` in emphasis.
+# Cost, stated: a line that becomes the marker only after this stripping now
+# counts as a sign-off, and a review whose last line is literally `- C` would be
+# read as a cut marker. Both are loud, both need the count to agree, and the
+# direction of the second one is FAIL — the safe one.
+NORM_BODY="$(printf '%s\n' "$RAW_BODY" | sed -E 's/[*_`]//g; s/^[[:space:]]*[>#+-]+[[:space:]]*//; s/[[:space:]]+$//')"
 # A complete marker line: the token, a colon, a number, nothing else. `tail -1`
 # because a review may legitimately quote the format earlier in its prose (this
 # very script's diff, for instance) — the last one is the one it signed off with.
@@ -506,9 +527,13 @@ if [ -n "$LAST_TRIM" ]; then
 fi
 # Emergency relief valve (documented in references/codex-review.md together
 # with its price): if the provider ever starts truncating tails, this stops the
-# marker from being the verdict and hands it back to the second echelon.
+# MARKER from being required. It does not, and must not, disarm the second
+# echelon's veto — see the branch below. Value matched case-insensitively, like
+# the consent branch above: `TRUE` and `Yes` mean what they say.
 RELAX=0
-case "${PF_CODEX_SENTINEL_OPTIONAL:-}" in 1|true|yes|on) RELAX=1 ;; esac
+case "$(printf '%s' "${PF_CODEX_SENTINEL_OPTIONAL:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) RELAX=1 ;;
+esac
 
 if [ -n "$SENTINEL_LINE" ] && [ "$SENTINEL_N" = "$TOTAL" ]; then
   : # Proven: the review ran and signed off with a count that matches the report.
@@ -516,18 +541,28 @@ elif [ "$RELAX" = 1 ]; then
   RELAX_NOTE="NOTE: PF_CODEX_SENTINEL_OPTIONAL is set — the completion marker is not required for this run. Price: without it a silent provider failure can again read as a clean review; only the old shape heuristics are left."
   echo "$RELAX_NOTE"
   printf '\n%s\n' "$RELAX_NOTE" >> "$OUT" 2>/dev/null || true
-  if [ "$TOTAL" = 0 ]; then
-    HINT_OUT="$(second_echelon_hint)" && {
-      echo "FAIL: not reviewed — the marker requirement is relaxed, but the output still matches a known failure shape."
-      echo "REPORT: $OUT (raw output kept for inspection)"
-      printf '%s\n' "$HINT_OUT"
-      exit 1
-    }
-  fi
+  # The veto runs whatever the finding count is. The T-024 gate found this
+  # guarded by `[ "$TOTAL" = 0 ]`, which meant the valve silently bought more
+  # than it advertised: a known 502 shape with a finding line inside was
+  # refused without the valve and accepted with it, while the doc and this
+  # script both claimed the second echelon still decided. The valve waives the
+  # MARKER; it never waives a contradiction the second echelon can name.
+  HINT_OUT="$(second_echelon_hint)" && {
+    echo "FAIL: not reviewed — the marker requirement is relaxed, but the output still matches a known failure shape."
+    echo "REPORT: $OUT (raw output kept for inspection)"
+    printf '%s\n' "$HINT_OUT"
+    exit 1
+  }
 elif [ -n "$SENTINEL_LINE" ]; then
   not_reviewed "the completion marker says $SENTINEL_N finding(s), but $TOTAL finding line(s) are present — the output is out of sync with its own sign-off (typically a truncated report)."
-elif [ "$SENTINEL_SEEN" = 1 ] || [ "$SENTINEL_CUT" = 1 ]; then
+elif [ "$SENTINEL_CUT" = 1 ]; then
   not_reviewed "the completion marker is there but broken — no complete '$SENTINEL: <N>' line, the output ends mid-marker. A corrupted sign-off outweighs any finding lines above it: the report is truncated."
+elif [ "$SENTINEL_SEEN" = 1 ]; then
+  # Split out from the truncation branch: a whole token with a count that is not
+  # a plain integer (`: +1`, `: 1.0`, `: one`) used to be reported as "the
+  # output ends mid-marker", which named the wrong defect — the marker is
+  # intact, the number is not. Same verdict, honest reason.
+  not_reviewed "the completion marker line is malformed — '$SENTINEL: <N>' takes a plain decimal count and nothing else on the line. With an unreadable count a finished report cannot be told from a truncated one."
 elif [ "$TOTAL" -gt 0 ] && second_echelon_hint >/dev/null 2>&1; then
   # The backup branch below is the weakest acceptance in this script, so it is
   # the one place where the old shape detectors keep a say — as a VETO, never

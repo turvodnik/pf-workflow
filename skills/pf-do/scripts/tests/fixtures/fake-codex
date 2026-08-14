@@ -229,6 +229,66 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
     sentinel_demanded "$ARGV_ALL" && printf '%s: 01\n' "$SENTINEL"
     exit 0 ;;
+  # --- T-024 gate, round 2: markdown dressing beyond emphasis ---------------
+  # The first fix-round granted tolerance to `**...**`, backticks and `_..._`
+  # only, and by accident to `* MARKER` (the star was in the strip class) but
+  # not `- MARKER`. Every form below is an obedient sign-off in a wrapper a
+  # real model plausibly writes, so every one must read as a sign-off.
+  marker-bold-label)
+    # Emphasis in the MIDDLE of the line, not at its edges — the shape the
+    # edge-only strip could never see.
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '**%s:** 0\n' "$SENTINEL"
+    exit 0 ;;
+  marker-list-dash)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf -- '- %s: 0\n' "$SENTINEL"
+    exit 0 ;;
+  marker-quote)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '> %s: 0\n' "$SENTINEL"
+    exit 0 ;;
+  marker-heading)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '## %s: 0\n' "$SENTINEL"
+    exit 0 ;;
+  # --- T-024 gate, round 2: the SAME dressing on finding lines --------------
+  # Both carry a CORRECT marker: the only thing that could refuse them is the
+  # finding counter disagreeing with the sign-off, which is exactly the false
+  # "truncated report" verdict the gate measured.
+  finding-bold-severity)
+    printf -- '- **[P1]** missing rollback — example.sh:3\n    explanation\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 1\n' "$SENTINEL"
+    exit 0 ;;
+  finding-indented)
+    printf 'Summary of the review:\n'
+    printf -- '  - [P2] unchecked exit code — example.sh:3\n    explanation\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 1\n' "$SENTINEL"
+    exit 0 ;;
+  # --- T-024 gate, round 2: counter forms that are not plain integers -------
+  # The token is intact; the count is not. Verdict stays FAIL — the message
+  # must blame the count, not claim a cut-off tail.
+  marker-count-malformed)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 1.0\n' "$SENTINEL"
+    exit 0 ;;
+  marker-count-plus)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: +1\n' "$SENTINEL"
+    exit 0 ;;
+  marker-count-word)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: one\n' "$SENTINEL"
+    exit 0 ;;
+  marker-count-zeros)
+    # All-zero count on a clean review: formatting, not a different number.
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 000\n' "$SENTINEL"
+    exit 0 ;;
+  marker-count-trailing-space)
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 1 \n' "$SENTINEL"
+    exit 0 ;;
   marker-lowercase)
     # Not the contract token: still FAIL, but the message must say why.
     printf 'Reviewed the diff. No problems found.\n'

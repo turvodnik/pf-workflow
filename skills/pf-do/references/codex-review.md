@@ -139,11 +139,21 @@ lines this script counted on faith.
   | the token appears only in the wrong case | `FAIL: not reviewed`, with a message that says so (the token is case-sensitive) |
   | anything else | `FAIL: not reviewed`, whatever the text looks like |
 
-  Markdown around the marker does not break it: the line edges are stripped of
-  `*`, `_` and backticks before the match, so `**CODEX-REVIEW-COMPLETE: 1**` is
-  an obedient sign-off, and `: 01` is one finding, not a mismatch. The stripped
-  view is used for the marker only — never for counting findings, whose lines
-  legitimately begin with `*`.
+  Markdown around the marker does not break it, and the **same tolerance
+  applies to finding lines** — an obedient review must never be refused for its
+  formatting, and the two halves have to agree or a correct marker reads as a
+  count desync. For the marker: emphasis characters (`*`, `_`, backticks) are
+  deleted anywhere on the line and a leading block marker (`>` quote, `#`
+  heading, `-`/`+`/`*` bullet) is dropped, so `**CODEX-REVIEW-COMPLETE: 1**`,
+  `**CODEX-REVIEW-COMPLETE:** 1`, `- CODEX-REVIEW-COMPLETE: 0`, `> …` and
+  `## …` are all obedient sign-offs; `: 01`, `: 000` and a trailing space are
+  formatting, not a different number. For findings, the counted shape is
+  `[indent] -|*|+ [emphasis][P1|P2|P3][emphasis] … — file:lines`, so
+  `- **[P1]** …` and an indented `  - [P2] …` count. A count that cannot be
+  read at all (`: +1`, `: 1.0`, `: one`) is still `FAIL`, with a message that
+  blames the count rather than claiming a cut-off tail. The stripped view is
+  used for the marker only — the finding counter still requires a bullet and a
+  bracketed severity, which is what makes a line a finding rather than prose.
 
   The backup row is **positive** evidence (a report has finding lines) rather
   than a denylist verdict — but it is the weakest acceptance here, so it is the
@@ -159,7 +169,11 @@ lines this script counted on faith.
 
   Residual risk, stated instead of argued away: an **unknown** failure shape
   that carries a well-formed finding line still passes this branch with a loud
-  `NOTE`. Read the report before trusting a `NOTE`ed `OK`. The branch covers
+  `NOTE` — and the widened finding shape above makes that class slightly larger,
+  since an indented or emphasised finding line inside a dump now counts too.
+  That is the price of not refusing obedient reviews for their formatting, and
+  it is paid on the branch that already prints a `NOTE` and never on a known
+  failure shape. Read the report before trusting a `NOTE`ed `OK`. The branch covers
   reviews *with* findings only: a clean review where the model forgot the marker
   gets a loud `FAIL`. That is the deliberate trade — being unable to verify must
   be a noisy state, never a silent "ok".
@@ -177,8 +191,15 @@ lines this script counted on faith.
 
 - **`PF_CODEX_SENTINEL_OPTIONAL=1` — the emergency valve, and its price.** If
   the provider ever starts cutting output tails, the marker would fail every
-  honest run. Setting this variable stops the marker from being the verdict and
-  hands it back to the second echelon; the run prints a loud `NOTE` and repeats
+  honest run. Setting this variable (`1`, `true`, `yes`, `on`, any case) waives
+  the **marker requirement** — and nothing else. It does **not** disarm the
+  second echelon: a known failure shape is still vetoed with the valve open,
+  whether or not the output carries finding lines. (An earlier version of this
+  line promised the verdict was "handed back to the second echelon", while the
+  code consulted the echelon only when there were zero findings — so a known
+  502 shape with a finding line inside was refused without the valve and
+  accepted with it. Fixed; the pair of tests now covers both counts.) The run
+  prints a loud `NOTE` and repeats
   it in the report. **The price is the entire T-024 guarantee**, and it is wider
   than "the silent failure comes back": the valve also silences the *positive*
   evidence of truncation. A count that disagrees with its own sign-off, and a
