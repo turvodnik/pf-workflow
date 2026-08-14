@@ -573,17 +573,32 @@ elif [ "$TOTAL" -gt 0 ] && second_echelon_hint >/dev/null 2>&1; then
   # from what nobody had imagined yet.
   not_reviewed "there are $TOTAL well-formed finding line(s), but no completion marker AND the output also matches a known provider/CLI failure shape. Without the marker, that contradiction is not resolvable in our favour."
 elif [ "$TOTAL" -gt 0 ]; then
-  # Backup proof that this IS a report: well-formed finding lines — positive
-  # evidence of structure, plus (above) the absence of any known failure shape.
-  # Residual risk, stated rather than argued away: an UNKNOWN failure shape
-  # carrying a well-formed finding line still passes here, loudly noted. That
-  # is strictly better than before and never worse, but it is not proof.
-  # It covers reviews WITH findings only; a clean review without the marker
-  # still fails, loudly and on purpose (a noisy false alarm beats a silent
-  # "clean").
-  BACKUP_NOTE="NOTE: the completion marker is missing, but $TOTAL well-formed finding line(s) prove this is a report — accepted on structure alone, which is weaker proof than the marker: read the report before trusting it. Tell the model to keep the final $SENTINEL line."
-  echo "$BACKUP_NOTE"
-  printf '\n%s\n' "$BACKUP_NOTE" >> "$OUT" 2>/dev/null || true
+  # Finding lines without the marker used to be ACCEPTED here (`OK` + a loud
+  # `NOTE`) as "backup proof that this is a report". T-029 retired that
+  # acceptance, and the reason is data, not taste:
+  #   * it was insurance against an UNMEASURED risk — "the model will forget
+  #     the marker". The 14.08.2026 live run over the whole wave (29 commits,
+  #     31 files, luna/max, 1236 s) measured it: the real model signed off with
+  #     `CODEX-REVIEW-COMPLETE: 9` as the last line of the report
+  #     (optimize/reports/2026-08-14-codex-review-final-wave.md);
+  #   * the price of that insurance was a hole in the contract Codex itself
+  #     rated P1: any output carrying one well-formed finding line was accepted
+  #     without the marker, so an UNKNOWN failure shape with such a line inside
+  #     read as a review.
+  # One live observation is not a law, so the branch is not simply deleted —
+  # it now FAILS with the recovery path named in the message. If the provider
+  # ever does start eating tails, `PF_CODEX_SENTINEL_OPTIONAL=1` waives the
+  # marker for that run (the valve above), and the second echelon still vetoes
+  # known failure shapes. Work continues; it just continues deliberately,
+  # by a human decision, instead of silently.
+  echo "FAIL: not reviewed — there are $TOTAL well-formed finding line(s), but no '$SENTINEL: <N>' completion marker. Finding lines are evidence of structure, never proof that a review ran: an unknown provider/CLI failure shape carrying one such line looks exactly like this."
+  echo "REPORT: $OUT (raw output kept for inspection)"
+  second_echelon_hint || true
+  echo "HINT: what to do, in this order —"
+  echo "HINT:   1. read $OUT: if it IS a real review, the model simply dropped the final line; re-run, the marker is required by the prompt ('$SENTINEL: <N>' as the very last line, <N> = number of findings);"
+  echo "HINT:   2. if it happens repeatedly, the provider is likely truncating tails. Then, and only then, re-run once with PF_CODEX_SENTINEL_OPTIONAL=1 — that waives the MARKER for that run (it does not waive the failure-shape veto) and prints its price;"
+  echo "HINT:   3. do not treat this output as a clean review: 'not reviewed' is not 'no findings'."
+  exit 1
 elif [ "$SENTINEL_CASE" = 1 ]; then
   not_reviewed "the completion marker appears only in the wrong case — the contract line is '$SENTINEL: <N>', spelled exactly like that. Treated as 'not reviewed'."
 else

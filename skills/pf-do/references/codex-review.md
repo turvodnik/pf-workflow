@@ -134,8 +134,8 @@ lines this script counted on faith.
   | marker present, `<N>` = counted findings | `OK` — proven review |
   | marker present, `<N>` ≠ counted findings | `FAIL: not reviewed` (out of sync with its own sign-off — typically truncated) |
   | marker cut anywhere inside the token (`CODEX-R`, `CODEX-REVIEW-COMPL`, even a single `C` as the last line) | `FAIL: not reviewed` (truncation outweighs any findings above it) |
-  | no marker, but ≥1 well-formed `- [P1\|P2\|P3] … — file:lines` line **and** no known failure shape | `OK` + a loud `NOTE` — accepted on report structure alone |
-  | no marker, ≥1 finding line, but the output also matches a known failure shape | `FAIL: not reviewed` — the second echelon vetoes the weakest branch |
+  | no marker, but ≥1 well-formed `- [P1\|P2\|P3] … — file:lines` line | `FAIL: not reviewed` + a `HINT:` block naming the way out (**T-029**; this row used to be `OK` + `NOTE`) |
+  | no marker, ≥1 finding line, and the output also matches a known failure shape | `FAIL: not reviewed` — same verdict, message names the failure shape too |
   | the token appears only in the wrong case | `FAIL: not reviewed`, with a message that says so (the token is case-sensitive) |
   | anything else | `FAIL: not reviewed`, whatever the text looks like |
 
@@ -155,41 +155,56 @@ lines this script counted on faith.
   used for the marker only — the finding counter still requires a bullet and a
   bracketed severity, which is what makes a line a finding rather than prose.
 
-  The backup row is **positive** evidence (a report has finding lines) rather
-  than a denylist verdict — but it is the weakest acceptance here, so it is the
-  one branch where the old shape detectors still hold a **veto**. That veto
-  replaces a claim this document used to make, which was false: "no provider
-  dump contains such a line". It was an argument from nobody having built one
-  yet — a denylist claim wearing the whitelist's clothes — and the T-024 gate
-  built two in minutes (a 502 page and a JSON error envelope, each with a
-  well-formed finding line inside). A denylist used to *reject* on the weakest
-  branch degrades safely: a shape it misses is no worse than the pre-T-024
-  behaviour, plus a loud `NOTE`. A denylist used to *justify accepting* is the
-  disease T-024 exists to cure.
+  **The backup row and what happened to it (T-029, decided on data).** Until
+  T-029 finding lines without a marker were *accepted* — `OK` plus a loud
+  `NOTE` — as "positive evidence that this is a report". That acceptance is
+  gone. Finding lines are still evidence of report *structure*; they are simply
+  no longer treated as proof that a review *ran*. What is left of the row is a
+  detailed `FAIL` message that names the recovery path (re-run; if it repeats,
+  the valve below).
 
-  Residual risk, stated instead of argued away: an **unknown** failure shape
-  that carries a well-formed finding line still passes this branch with a loud
-  `NOTE` — and the widened finding shape above makes that class slightly larger,
-  since an indented or emphasised finding line inside a dump now counts too.
-  That is the price of not refusing obedient reviews for their formatting, and
-  it is paid on the branch that already prints a `NOTE` and never on a known
-  failure shape. Read the report before trusting a `NOTE`ed `OK`. The branch covers
-  reviews *with* findings only: a clean review where the model forgot the marker
-  gets a loud `FAIL`. That is the deliberate trade — being unable to verify must
-  be a noisy state, never a silent "ok".
+  The reason is a measurement, not a preference. The backup acceptance was
+  insurance against an **unmeasured** risk — "the model will forget the marker".
+  On **14.08.2026** that risk was measured on the live wire: a full Codex run
+  over the whole wave (29 commits, 31 files, `luna`/`max`, 1236 s, report
+  `optimize/reports/2026-08-14-codex-review-final-wave.md`) ended with
+  `CODEX-REVIEW-COMPLETE: 9` as the **last line**, matching its nine findings.
+  The real model obeys the contract. Meanwhile the price of the insurance was a
+  hole *in* the contract — Codex itself rated it **P1** in that same run: any
+  output carrying one well-formed finding line was accepted with no marker, so
+  an **unknown** failure shape with such a line inside read as a review. Paying
+  a real hole for protection against something never observed is a bad trade,
+  and now there is data to say so.
+
+  One live observation is not a law, so the row was **not** simply deleted. The
+  failure is recoverable by design: the `FAIL` message spells out the order —
+  read the report, re-run (the prompt requires the marker), and if the provider
+  really has started eating tails, open `PF_CODEX_SENTINEL_OPTIONAL=1` for that
+  run. Work continues; it just continues by a human decision instead of
+  silently. The old claim this paragraph used to defend — "no provider dump
+  contains such a line" — was false anyway: a denylist claim wearing the
+  whitelist's clothes, and the T-024 gate built two counter-examples in minutes
+  (a 502 page and a JSON error envelope, each with a well-formed finding line
+  inside). The shape detectors keep their **veto** on this row, now only to make
+  the message more specific.
 
   Known blind spot at the boundary, stated rather than hidden: truncation that
   eats the marker line *whole* leaves zero characters of it, which nothing can
-  tell apart from a model that never wrote one. With findings present that lands
-  in the backup row (`OK` + `NOTE`); with a clean review it lands in `FAIL`.
-  Truncation from one character of the token onwards is caught.
+  tell apart from a model that never wrote one. Since T-029 both cases land in
+  the same place — `FAIL`, with findings present or not — which removes the odd
+  asymmetry where a truncated report with findings was safer to lose than a
+  truncated clean one. Truncation from one character of the token onwards is
+  caught by the cut detector and named as such.
 
   The old detectors (word signature + error-envelope shape) are still there,
   demoted to a second echelon: they no longer decide anything, they add a
   `HINT:` line explaining *why* a failure probably happened ("looks like a
   provider error"), which "no marker" alone would not say.
 
-- **`PF_CODEX_SENTINEL_OPTIONAL=1` — the emergency valve, and its price.** If
+- **`PF_CODEX_SENTINEL_OPTIONAL=1` — the emergency valve, and its price.** Since
+  T-029 this is the **only** way any marker-less output can be accepted, which
+  raises its importance: it is the thing that keeps the pipeline movable if the
+  model ever does go silent. If
   the provider ever starts cutting output tails, the marker would fail every
   honest run. Setting this variable (`1`, `true`, `yes`, `on`, any case) waives
   the **marker requirement** — and nothing else. It does **not** disarm the

@@ -455,7 +455,26 @@ i033_note_case() {
   fi
   rm -rf "$repo"
 }
-i033_note_case findings-no-marker ok "marker missing but two well-formed finding lines -> accepted on structure, with a loud NOTE"
+# T-029: the backup ACCEPTANCE is gone. Finding lines without the marker used
+# to be `OK` + `NOTE`; they are now `FAIL: not reviewed`. Two assertions, not
+# one — the verdict AND the recovery path, because a FAIL that does not name
+# the valve just moves the hole from the contract to the operator's day.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=findings-no-marker" -- --scope uncommitted 2>&1 )"; rc=$?
+if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed' \
+   && ! printf '%s' "$out" | grep -q '^OK:' \
+   && printf '%s' "$out" | grep -q 'PF_CODEX_SENTINEL_OPTIONAL'; then
+  pass "T-029: marker missing but two well-formed finding lines -> FAIL, and the message names PF_CODEX_SENTINEL_OPTIONAL as the way out (rc=$rc)"
+else
+  fail "T-029: findings without marker -> unexpected (rc=$rc)" "stdout: $(printf '%s' "$out" | head -6 | tr '\n' '|')"
+fi
+rm -rf "$repo"
+
+# The other half of the same decision: work must not STOP if the model ever
+# does go silent. Same fixture, valve open -> OK again.
+i033_note_case findings-no-marker ok "T-029: PF_CODEX_SENTINEL_OPTIONAL=1 + findings without a marker -> OK again, the valve is the documented way through" "PF_CODEX_SENTINEL_OPTIONAL=1"
 
 # Emergency relief valve: the marker stops being the verdict, the second
 # echelon decides again — loudly, and at the stated price.
@@ -512,10 +531,11 @@ f09_case clean fail-not-reviewed "negative control: honest clean review, require
 f09_case clean-oneline fail-not-reviewed "negative control: one-line clean review, requirement removed -> red"
 f09_case clean-security-prose fail-not-reviewed "negative control: long clean auth/rate-limit prose, requirement removed -> red"
 f09_case clean-quotes-traceback fail-not-reviewed "negative control: clean review quoting a traceback, requirement removed -> red"
-# A review WITH findings stays green on purpose: the backup proof of report
-# structure is doing its job, and this row documents that boundary rather than
-# leaving it as an unstated soft spot.
-i033_note_case success ok "negative control boundary: a review WITH findings survives on structure alone, with a loud NOTE"
+# A review WITH findings used to stay green here (the backup acceptance on
+# report structure). T-029 removed that acceptance, so this row flipped: with
+# the requirement cut out of the prompt, findings no longer rescue anything.
+# The boundary is still documented, it just moved to the safe side.
+f09_case success fail-not-reviewed "negative control: review WITH findings, requirement removed -> red too (no backup acceptance left)"
 SUT="$SUT_REAL"
 
 # ===========================================================================
