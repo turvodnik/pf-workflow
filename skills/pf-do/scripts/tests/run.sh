@@ -362,6 +362,40 @@ f09_case sentinel-count-mismatch fail-not-reviewed "marker claims 3 findings, 1 
 f09_case truncated-marker fail-not-reviewed "output cut mid-marker ('CODEX-REVIEW-COMPL') with findings present -> FAIL, truncation beats the backup proof"
 f09_case clean-no-marker fail-not-reviewed "model forgot the marker on a clean review -> loud FAIL by design (never a silent 'clean')"
 
+# T-024 gate: the backup branch is attacked directly. A provider failure with a
+# well-formed finding line inside it used to be accepted as a review — the
+# justification was "no provider dump contains such a line", which was an
+# argument from nobody having built one yet. The old shape detectors now hold a
+# VETO over this one branch (they still decide nothing on their own), so both
+# shapes fail AND explain themselves.
+f09_case gate-html-with-finding fail-not-reviewed "502 HTML page with a '- [P1] ... — file:lines' inside -> vetoed, not accepted on structure" hint
+f09_case gate-json-with-finding fail-not-reviewed "JSON error envelope with a '- [P2] ... — file:lines' after it -> vetoed, not accepted on structure" hint
+
+# T-024 gate: truncation in the first characters of the token. The 8-character
+# floor left 1..7 invisible, so these were accepted on the backup proof.
+f09_case truncated-marker-1 fail-not-reviewed "output cut after 1 character of the marker ('C'), findings present -> truncation wins"
+f09_case truncated-marker-7 fail-not-reviewed "output cut after 7 characters of the marker ('CODEX-R'), findings present -> truncation wins"
+
+# T-024 gate: an obedient marker wearing markdown. The likeliest real-model
+# deviation — the sign-off is present and correct, only wrapped.
+f09_case marker-bold ok "marker in markdown bold ('**...: 1**') with one finding -> recognised as a sign-off"
+f09_case marker-backticks ok "marker in backticks on a clean review -> recognised as a sign-off"
+f09_case marker-underscores ok "marker in underscores on a clean review -> recognised as a sign-off"
+f09_case marker-leading-zero ok "marker count written '01' with one finding -> leading zero is formatting, not a mismatch"
+
+# T-024 gate: a lowercase token is not the contract, but the message must not
+# claim there is no marker at all.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=marker-lowercase" -- --scope uncommitted 2>&1 )"; rc=$?
+if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed' && printf '%s' "$out" | grep -qi 'wrong case'; then
+  pass "lowercase marker -> FAIL whose message names the case, not 'no marker at all' (rc=$rc)"
+else
+  fail "lowercase marker -> unexpected (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
+fi
+rm -rf "$repo"
+
 # Backup proof: well-formed finding lines. Positive evidence of report
 # structure, not a guess about what an error looks like.
 i033_note_case() {
@@ -402,7 +436,7 @@ group "I-033 negative control: strip the marker requirement from the prompt -> h
 # signing off — exactly as a model that was never asked would.
 NEGCTL="$WORKROOT/codex-review-no-sentinel.sh"
 sed -e "/^MANDATORY, no exceptions:/,/^discarded as 'not reviewed', however good the review itself was\.\"$/d" \
-    -e 's/^real defect, P3 = worth fixing\. Report nothing you cannot point to in the diff\.$/&"/' \
+    -e 's/^report anything you cannot anchor that way\.$/&"/' \
     "$SUT" > "$NEGCTL"
 # Guard: a reworded prompt must break this group loudly instead of silently
 # turning it into a no-op that "passes" while cutting nothing.
@@ -470,9 +504,9 @@ f10_case() {
 
 for ref in 'evil;semi' 'evil$(sub)' 'evil`tick`'; do
   f10_case --base "$ref" why "focused mode, --base with ref [$ref]"
-  f10_case --base "$ref" native "native mode, --base with ref [$ref]"
+  f10_case --base "$ref" plain "default mode (no --why), --base with ref [$ref]"
   f10_case --commit "$ref" why "focused mode, --commit with ref [$ref]"
-  f10_case --commit "$ref" native "native mode, --commit with ref [$ref]"
+  f10_case --commit "$ref" plain "default mode (no --why), --commit with ref [$ref]"
 done
 
 # regression guard: an unknown ref must still cleanly skip, not crash.

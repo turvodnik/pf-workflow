@@ -296,7 +296,10 @@ PROMPT="Review the changes in this repository. Get them with: $DIFF_CMD
 # what the number means, so an honest review cannot fail on an ambiguous count.
 PROMPT="${PROMPT}Report every problem on its own line as: - [P1|P2|P3] short title — file:lines
 followed by an indented explanation. P1 = breaks or endangers something, P2 =
-real defect, P3 = worth fixing. Report nothing you cannot point to in the diff.
+real defect, P3 = worth fixing. Every finding must name the place in the diff it
+concerns; when the problem is what the diff does NOT contain (a missing test,
+check, guard or rollback), name the file:lines where it should have been. Do not
+report anything you cannot anchor that way.
 MANDATORY, no exceptions: the very last line of your output must be exactly
 $SENTINEL: <N>
 where <N> is the number of [P1]/[P2]/[P3] finding lines you wrote above. Write
@@ -463,23 +466,42 @@ not_reviewed() {
   exit 1
 }
 
+# Markdown emphasis around the sign-off is the most likely thing a real model
+# does to it (`**CODEX-REVIEW-COMPLETE: 1**`, or the line in backticks). That is
+# an obedient marker in a wrapper, not a missing one, so the edges of every line
+# are stripped of `*`, `_` and backticks before the marker is looked for. The
+# stripped view is used ONLY for marker detection — never for counting findings,
+# whose lines legitimately begin with `*`.
+NORM_BODY="$(printf '%s\n' "$RAW_BODY" | sed -E 's/^[[:space:]]*[*_`]+[[:space:]]*//; s/[[:space:]]*[*_`]+[[:space:]]*$//')"
 # A complete marker line: the token, a colon, a number, nothing else. `tail -1`
 # because a review may legitimately quote the format earlier in its prose (this
 # very script's diff, for instance) — the last one is the one it signed off with.
-SENTINEL_LINE="$(printf '%s\n' "$RAW_BODY" | grep -E "^[[:space:]]*$SENTINEL:[[:space:]]*[0-9]+[[:space:]]*$" | tail -1)"
+SENTINEL_LINE="$(printf '%s\n' "$NORM_BODY" | grep -E "^[[:space:]]*$SENTINEL:[[:space:]]*[0-9]+[[:space:]]*$" | tail -1)"
 SENTINEL_N=""
-[ -n "$SENTINEL_LINE" ] && SENTINEL_N="$(printf '%s' "$SENTINEL_LINE" | sed -E 's/[^0-9]//g')"
+# Leading zeros are the model's formatting, not a different number: `: 01` with
+# one finding is a match. Stripped textually rather than through $((10#…)),
+# which overflows on an absurdly long digit string instead of just disagreeing.
+[ -n "$SENTINEL_LINE" ] && SENTINEL_N="$(printf '%s' "$SENTINEL_LINE" | sed -E 's/[^0-9]//g; s/^0+([0-9])/\1/')"
 SENTINEL_SEEN=0
-printf '%s\n' "$RAW_BODY" | grep -qF "$SENTINEL" && SENTINEL_SEEN=1
+printf '%s\n' "$NORM_BODY" | grep -qF "$SENTINEL" && SENTINEL_SEEN=1
+# The token is case-sensitive on purpose (a lowercase one is not the contract),
+# but the failure message should say WHY rather than claim there is no marker.
+SENTINEL_CASE=0
+[ "$SENTINEL_SEEN" = 0 ] && printf '%s\n' "$NORM_BODY" | grep -qiF "$SENTINEL" && SENTINEL_CASE=1
 # Truncation that lands INSIDE the token leaves no whole token to find — the
 # tail then reads as a fragment like "CODEX-REVIEW-COMPL". So the last
-# non-empty line is also checked against the token's prefixes. The 8-character
-# floor keeps an ordinary sentence from ever qualifying; nothing shorter is
-# evidence of anything.
+# non-empty line is also checked against the token's prefixes. ANY non-empty
+# prefix counts: an earlier 8-character floor left a window where a cut after
+# 1..7 characters was invisible. Matching is exact, case-sensitive and against
+# the WHOLE trimmed line, so a real review would have to end with a line that is
+# literally `C` or `CODEX-R` to trip it — and the cost of that is a loud FAIL,
+# the safe direction. What no check can see is a cut that ate the marker line
+# whole: zero characters of it are left, which is indistinguishable from a model
+# that never wrote one (documented in references/codex-review.md).
 SENTINEL_CUT=0
-LAST_LINE="$(printf '%s\n' "$RAW_BODY" | grep '.' | tail -1)"
+LAST_LINE="$(printf '%s\n' "$NORM_BODY" | grep '.' | tail -1)"
 LAST_TRIM="$(printf '%s' "$LAST_LINE" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-if [ "${#LAST_TRIM}" -ge 8 ]; then
+if [ -n "$LAST_TRIM" ]; then
   case "$SENTINEL" in "$LAST_TRIM"*) SENTINEL_CUT=1 ;; esac
 fi
 # Emergency relief valve (documented in references/codex-review.md together
@@ -506,15 +528,29 @@ elif [ -n "$SENTINEL_LINE" ]; then
   not_reviewed "the completion marker says $SENTINEL_N finding(s), but $TOTAL finding line(s) are present — the output is out of sync with its own sign-off (typically a truncated report)."
 elif [ "$SENTINEL_SEEN" = 1 ] || [ "$SENTINEL_CUT" = 1 ]; then
   not_reviewed "the completion marker is there but broken — no complete '$SENTINEL: <N>' line, the output ends mid-marker. A corrupted sign-off outweighs any finding lines above it: the report is truncated."
+elif [ "$TOTAL" -gt 0 ] && second_echelon_hint >/dev/null 2>&1; then
+  # The backup branch below is the weakest acceptance in this script, so it is
+  # the one place where the old shape detectors keep a say — as a VETO, never
+  # as a reason to accept. The T-024 gate proved why: a 502 page and a JSON
+  # error envelope, each with a well-formed finding line inside, were accepted
+  # as reviews. The original justification ("no provider dump contains such a
+  # line") was a denylist claim wearing the whitelist's clothes — an argument
+  # from what nobody had imagined yet.
+  not_reviewed "there are $TOTAL well-formed finding line(s), but no completion marker AND the output also matches a known provider/CLI failure shape. Without the marker, that contradiction is not resolvable in our favour."
 elif [ "$TOTAL" -gt 0 ]; then
-  # Backup proof that this IS a report: well-formed finding lines. Positive
-  # evidence of structure, not a guess about what an error looks like — no
-  # provider dump contains "- [P2] title — file:lines". It covers reviews WITH
-  # findings only; a clean review without the marker still fails, loudly and
-  # on purpose (better a noisy false alarm than a silent "clean").
-  BACKUP_NOTE="NOTE: the completion marker is missing, but $TOTAL well-formed finding line(s) prove this is a report — accepted on structure. Tell the model to keep the final $SENTINEL line."
+  # Backup proof that this IS a report: well-formed finding lines — positive
+  # evidence of structure, plus (above) the absence of any known failure shape.
+  # Residual risk, stated rather than argued away: an UNKNOWN failure shape
+  # carrying a well-formed finding line still passes here, loudly noted. That
+  # is strictly better than before and never worse, but it is not proof.
+  # It covers reviews WITH findings only; a clean review without the marker
+  # still fails, loudly and on purpose (a noisy false alarm beats a silent
+  # "clean").
+  BACKUP_NOTE="NOTE: the completion marker is missing, but $TOTAL well-formed finding line(s) prove this is a report — accepted on structure alone, which is weaker proof than the marker: read the report before trusting it. Tell the model to keep the final $SENTINEL line."
   echo "$BACKUP_NOTE"
   printf '\n%s\n' "$BACKUP_NOTE" >> "$OUT" 2>/dev/null || true
+elif [ "$SENTINEL_CASE" = 1 ]; then
+  not_reviewed "the completion marker appears only in the wrong case — the contract line is '$SENTINEL: <N>', spelled exactly like that. Treated as 'not reviewed'."
 else
   not_reviewed "no '$SENTINEL: <N>' line in the output, so there is no proof a review ran at all. Anything without that marker is treated as 'not reviewed', whatever the text looks like."
 fi

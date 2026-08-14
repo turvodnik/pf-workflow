@@ -180,6 +180,60 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf -- '- [P1] fake blocker — fixtures/example.sh:10\n    explanation\n'
     printf -- '- [P2] fake defect — fixtures/example.sh:20\n    explanation\n'
     exit 0 ;;
+  # --- T-024 gate: attacks on the BACKUP branch itself ---------------------
+  # A provider failure that happens to carry a well-formed finding line inside
+  # it. These are emitted unconditionally (a failing provider never reads our
+  # prompt), and they are the two shapes the gate used to walk straight past
+  # the backup proof into "OK + NOTE". The finding line is what makes them
+  # dangerous; the known failure shape around it is what must now veto them.
+  gate-html-with-finding)
+    printf '<!DOCTYPE html>\n<html>\n<head><title>502 Bad Gateway</title></head>\n<body>\n'
+    printf '<h1>502 Bad Gateway</h1>\n<pre>\n'
+    printf -- '- [P1] Internal renderer error — example.sh:1-2\n'
+    printf '</pre>\n</body>\n</html>\n'
+    exit 0 ;;
+  gate-json-with-finding)
+    printf '{"error": {"code": "context_length_exceeded", "message": "the request\n'
+    printf 'exceeded the model context window", "request_id": "req_00000043"}}\n'
+    printf -- '- [P2] unchecked exit code — example.sh:3\n'
+    exit 0 ;;
+  # --- T-024 gate: truncation inside the first characters of the token -----
+  # The old 8-character floor made these invisible: a cut after 1..7 characters
+  # left a fragment too short to be checked, so the run was accepted on the
+  # backup proof instead of failing as truncated.
+  truncated-marker-1)
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    printf 'C'
+    exit 0 ;;
+  truncated-marker-7)
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    printf 'CODEX-R'
+    exit 0 ;;
+  # --- T-024 gate: an obedient marker in markdown clothing -----------------
+  # The likeliest real-model deviation. The marker is there and correct; only
+  # its wrapper differs, so these must read as honest sign-offs.
+  marker-bold)
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    sentinel_demanded "$ARGV_ALL" && printf '**%s: 1**\n' "$SENTINEL"
+    exit 0 ;;
+  marker-backticks)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '`%s: 0`\n' "$SENTINEL"
+    exit 0 ;;
+  marker-underscores)
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf '_%s: 0_\n' "$SENTINEL"
+    exit 0 ;;
+  marker-leading-zero)
+    # `: 01` for one finding — the model's formatting, not a different count.
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    sentinel_demanded "$ARGV_ALL" && printf '%s: 01\n' "$SENTINEL"
+    exit 0 ;;
+  marker-lowercase)
+    # Not the contract token: still FAIL, but the message must say why.
+    printf 'Reviewed the diff. No problems found.\n'
+    sentinel_demanded "$ARGV_ALL" && printf 'codex-review-complete: 0\n'
+    exit 0 ;;
   # --- I-033: the ten provider-failure shapes measured by the T-023 gate ----
   # Every one of them: exit 0, no marker, and (except where the table itself
   # noted otherwise) long enough that the old length gate could not save us.

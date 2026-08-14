@@ -133,18 +133,42 @@ lines this script counted on faith.
   |---|---|
   | marker present, `<N>` = counted findings | `OK` — proven review |
   | marker present, `<N>` ≠ counted findings | `FAIL: not reviewed` (out of sync with its own sign-off — typically truncated) |
-  | marker broken / cut mid-token | `FAIL: not reviewed` (truncation outweighs any findings above it) |
-  | no marker, but ≥1 well-formed `- [P1|P2|P3] … — file:lines` line | `OK` + a loud `NOTE` — accepted on report structure |
+  | marker cut anywhere inside the token (`CODEX-R`, `CODEX-REVIEW-COMPL`, even a single `C` as the last line) | `FAIL: not reviewed` (truncation outweighs any findings above it) |
+  | no marker, but ≥1 well-formed `- [P1\|P2\|P3] … — file:lines` line **and** no known failure shape | `OK` + a loud `NOTE` — accepted on report structure alone |
+  | no marker, ≥1 finding line, but the output also matches a known failure shape | `FAIL: not reviewed` — the second echelon vetoes the weakest branch |
+  | the token appears only in the wrong case | `FAIL: not reviewed`, with a message that says so (the token is case-sensitive) |
   | anything else | `FAIL: not reviewed`, whatever the text looks like |
 
-  The fourth row is the backup proof, and it is **positive** evidence (a report
-  has finding lines) rather than another denylist — no provider dump contains
-  such a line, so it does not reopen the hole. It covers reviews *with*
-  findings only: a clean review where the model forgot the marker gets a loud
-  `FAIL`. That is the deliberate trade — being unable to verify must be a
-  noisy state, never a silent "ok". Known soft spot, stated rather than hidden:
-  a review with findings truncated *before* the marker even starts reads as
-  `OK` + `NOTE`.
+  Markdown around the marker does not break it: the line edges are stripped of
+  `*`, `_` and backticks before the match, so `**CODEX-REVIEW-COMPLETE: 1**` is
+  an obedient sign-off, and `: 01` is one finding, not a mismatch. The stripped
+  view is used for the marker only — never for counting findings, whose lines
+  legitimately begin with `*`.
+
+  The backup row is **positive** evidence (a report has finding lines) rather
+  than a denylist verdict — but it is the weakest acceptance here, so it is the
+  one branch where the old shape detectors still hold a **veto**. That veto
+  replaces a claim this document used to make, which was false: "no provider
+  dump contains such a line". It was an argument from nobody having built one
+  yet — a denylist claim wearing the whitelist's clothes — and the T-024 gate
+  built two in minutes (a 502 page and a JSON error envelope, each with a
+  well-formed finding line inside). A denylist used to *reject* on the weakest
+  branch degrades safely: a shape it misses is no worse than the pre-T-024
+  behaviour, plus a loud `NOTE`. A denylist used to *justify accepting* is the
+  disease T-024 exists to cure.
+
+  Residual risk, stated instead of argued away: an **unknown** failure shape
+  that carries a well-formed finding line still passes this branch with a loud
+  `NOTE`. Read the report before trusting a `NOTE`ed `OK`. The branch covers
+  reviews *with* findings only: a clean review where the model forgot the marker
+  gets a loud `FAIL`. That is the deliberate trade — being unable to verify must
+  be a noisy state, never a silent "ok".
+
+  Known blind spot at the boundary, stated rather than hidden: truncation that
+  eats the marker line *whole* leaves zero characters of it, which nothing can
+  tell apart from a model that never wrote one. With findings present that lands
+  in the backup row (`OK` + `NOTE`); with a clean review it lands in `FAIL`.
+  Truncation from one character of the token onwards is caught.
 
   The old detectors (word signature + error-envelope shape) are still there,
   demoted to a second echelon: they no longer decide anything, they add a
@@ -155,9 +179,13 @@ lines this script counted on faith.
   the provider ever starts cutting output tails, the marker would fail every
   honest run. Setting this variable stops the marker from being the verdict and
   hands it back to the second echelon; the run prints a loud `NOTE` and repeats
-  it in the report. **The price is the entire T-024 guarantee**: with it set, a
-  silent provider failure can again read as a clean review — exactly the hole
-  three tickets failed to close by other means. Use it as a temporary bridge
+  it in the report. **The price is the entire T-024 guarantee**, and it is wider
+  than "the silent failure comes back": the valve also silences the *positive*
+  evidence of truncation. A count that disagrees with its own sign-off, and a
+  marker cut mid-token, both stop being verdicts — so a **truncated report reads
+  as a whole one**, and a silent provider failure again reads as a clean review.
+  That is exactly the hole three tickets failed to close by other means, plus
+  one more. Use it as a temporary bridge
   while the prompt is fixed, never as a default; if the marker is genuinely
   unobtainable, that is a blocker worth raising, not a setting worth keeping.
 - **An empty report means the run died**, not that the code is clean. Codex emits
