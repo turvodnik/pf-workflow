@@ -10,12 +10,34 @@ if [ -n "${FAKE_CODEX_CALL_LOG:-}" ]; then
   printf 'called\n' >> "$FAKE_CODEX_CALL_LOG"
 fi
 
+# I-033 (T-024): the double is now PROMPT-AWARE. A compliant model ends its
+# output with the completion marker the prompt demands — and emits nothing of
+# the sort when the prompt does not demand it. That single behaviour is what
+# makes the negative control real: strip the requirement out of the SUT's
+# prompt and every honest fixture below stops signing off, so the suite goes
+# red. Without this, fixtures would emit the marker unconditionally and the
+# "does the verdict actually depend on the marker" question could never be
+# answered by the harness itself.
+SENTINEL='CODEX-REVIEW-COMPLETE'
+sentinel_demanded() {
+  case "$*" in *"$SENTINEL"*) return 0 ;; esac
+  return 1
+}
+# emit_sentinel <n> — the marker, exactly as a compliant model would write it.
+emit_sentinel() {
+  sentinel_demanded "$ARGV_ALL" || return 0
+  printf '%s: %s\n' "$SENTINEL" "$1"
+}
+ARGV_ALL="$*"
+
 case "${FAKE_CODEX_MODE:-success}" in
   success)
     printf -- '- [P2] fake finding — fixtures/example.sh:1\n    because the test says so\n'
+    emit_sentinel 1
     exit 0 ;;
   clean)
     printf 'Reviewed the diff. No problems found.\n'
+    emit_sentinel 0
     exit 0 ;;
   clean-security-prose)
     # I-022 repro: a genuine, clean review of auth/rate-limit code — long,
@@ -27,6 +49,7 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf 'limit of 100 requests per minute per API key, and the counter resets on\n'
     printf 'schedule as expected under the added tests.\n\n'
     printf 'No problems found. This review is complete.\n'
+    emit_sentinel 0
     exit 0 ;;
   error-rc0)
     # F-09 repro: provider-side failure text on stdout, CLI itself exits 0.
@@ -74,6 +97,7 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf 'whose repr starts with "Traceback (most recent call last):" and logs it\n'
     printf 'at WARNING before retrying, which matches the existing test fixtures.\n\n'
     printf 'No problems found. This review is complete.\n'
+    emit_sentinel 0
     exit 0 ;;
   clean-quotes-html)
     printf 'Reviewed the diff across 2 files covering the error-page renderer.\n\n'
@@ -82,6 +106,7 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf 'sending it back to the caller, and unit tests assert on that literal\n'
     printf 'prefix. Error mapping otherwise matches the existing 4xx/5xx table.\n\n'
     printf 'No problems found. This review is complete.\n'
+    emit_sentinel 0
     exit 0 ;;
   clean-quotes-json-error)
     printf 'Reviewed the diff across 2 files covering the JSON error envelope.\n\n'
@@ -89,6 +114,7 @@ case "${FAKE_CODEX_MODE:-success}" in
     printf 'envelope with a stable "code" field, matching the schema the client\n'
     printf 'already expects, and the added tests cover the 4xx/5xx boundary.\n\n'
     printf 'No problems found. This review is complete.\n'
+    emit_sentinel 0
     exit 0 ;;
   boundary-chars-at)
     # T-023 gate hygiene: pin the ERR_SHAPE_CHARS boundary itself, not just
@@ -109,6 +135,122 @@ case "${FAKE_CODEX_MODE:-success}" in
     # gated out); still not a structural match either -> OK.
     printf -v _pad '%*s' 277 ''
     printf 'authentication failed: %s\n' "${_pad// /x}"
+    exit 0 ;;
+  # --- I-033 (T-024): honest reviews that sign off with the marker ----------
+  clean-oneline)
+    # The shortest possible honest review: nothing but the sign-off. Under the
+    # old length heuristics this was the most "suspicious" shape there is;
+    # under the success contract it is fully proven. (With the requirement
+    # removed from the prompt it emits nothing at all -> empty -> FAIL, which
+    # is exactly what the negative control expects.)
+    emit_sentinel 0
+    exit 0 ;;
+  findings-multi)
+    printf -- '- [P1] fake blocker — fixtures/example.sh:10\n    explanation\n'
+    printf -- '- [P2] fake defect — fixtures/example.sh:20\n    explanation\n'
+    printf -- '- [P3] fake nit — fixtures/example.sh:30\n    explanation\n'
+    emit_sentinel 3
+    exit 0 ;;
+  # --- I-033: broken sign-offs ---------------------------------------------
+  sentinel-count-mismatch)
+    # One finding, a sign-off claiming three: the report and its own marker
+    # disagree, which is what a truncated middle looks like. Written literally
+    # (not through emit_sentinel) — this fixture is about a WRONG marker, and
+    # it must behave the same whether or not the prompt asked for one.
+    printf -- '- [P2] fake finding — fixtures/example.sh:1\n    explanation\n'
+    printf 'CODEX-REVIEW-COMPLETE: 3\n'
+    exit 0 ;;
+  truncated-marker)
+    # The tail was cut mid-marker: two real findings, then the sign-off breaks
+    # off in the middle of the token, with no trailing newline. Must FAIL even
+    # though well-formed finding lines are present — a corrupted marker is
+    # stronger evidence of truncation than findings are of completeness.
+    printf -- '- [P1] fake blocker — fixtures/example.sh:10\n    explanation\n'
+    printf -- '- [P2] fake defect — fixtures/example.sh:20\n    explanation\n'
+    printf 'CODEX-REVIEW-COMPL'
+    exit 0 ;;
+  clean-no-marker)
+    # An honest-looking clean review by a model that ignored the requirement.
+    # Never emits the marker, whatever the prompt says.
+    printf 'Reviewed the diff across 3 files.\n\nNo problems found.\n'
+    exit 0 ;;
+  findings-no-marker)
+    # Same disobedience, but with findings: the backup proof of "this is a
+    # report" (well-formed finding lines) must accept it, loudly.
+    printf -- '- [P1] fake blocker — fixtures/example.sh:10\n    explanation\n'
+    printf -- '- [P2] fake defect — fixtures/example.sh:20\n    explanation\n'
+    exit 0 ;;
+  # --- I-033: the ten provider-failure shapes measured by the T-023 gate ----
+  # Every one of them: exit 0, no marker, and (except where the table itself
+  # noted otherwise) long enough that the old length gate could not save us.
+  # None contains a well-formed finding line, so the backup proof cannot
+  # rescue them either. They are here to prove one thing: a whitelist catches
+  # all ten WITHOUT a single detector written for their shapes.
+  t024-form-01)
+    printf 'Error occurred while contacting provider:\n'
+    printf 'Traceback (most recent call last):\n'
+    printf '  File "/app/provider_client.py", line 142, in call\n'
+    printf '    resp = self._session.post(url, json=payload, timeout=30)\n'
+    printf 'requests.exceptions.ConnectionError: HTTPSConnectionPool: Max retries exceeded\n'
+    exit 0 ;;
+  t024-form-02)
+    printf 'codex-cli 1.0.6\n\n'
+    printf '<!DOCTYPE html>\n<html>\n<head><title>502 Bad Gateway</title></head>\n'
+    printf '<body>\n<center><h1>502 Bad Gateway</h1></center>\n</body>\n</html>\n'
+    exit 0 ;;
+  t024-form-03)
+    printf 'provider response:\n'
+    printf '{"error": {"code": "upstream_unavailable", "message": "the model backend is\n'
+    printf 'temporarily unavailable, retry later", "request_id": "req_0000000000000042"}}\n'
+    printf 'no review was produced for this request\n'
+    exit 0 ;;
+  t024-form-04)
+    printf -- '---\n'
+    printf 'Traceback (most recent call last):\n'
+    printf '  File "/app/provider_client.py", line 142, in call\n'
+    printf '    resp = self._session.post(url, json=payload, timeout=30)\n'
+    printf 'requests.exceptions.ConnectionError: HTTPSConnectionPool: Max retries exceeded\n'
+    exit 0 ;;
+  t024-form-05)
+    printf 'Reviewing 3 files...\n'
+    _i=1
+    while [ "$_i" -le 18 ]; do
+      printf 'internal dump line %s: state=partial buffer=0x%s handler=stream\n' "$_i" "$_i"
+      _i=$(( _i + 1 ))
+    done
+    exit 0 ;;
+  t024-form-06)
+    # ANSI-coloured traceback: the escape sequence sits before the very first
+    # visible character, which is precisely what defeated the position-anchored
+    # structural detector.
+    printf '\033[31mTraceback (most recent call last):\033[0m\n'
+    printf '  File "/app/provider_client.py", line 142, in call\n'
+    printf '    resp = self._session.post(url, json=payload, timeout=30)\n'
+    printf '\033[31mrequests.exceptions.ConnectionError: HTTPSConnectionPool: Max retries exceeded\033[0m\n'
+    exit 0 ;;
+  t024-form-07)
+    # A line of spaces first: non-empty, so it IS the first line, and it
+    # matches nothing.
+    printf '     \n'
+    printf 'Traceback (most recent call last):\n'
+    printf '  File "/app/provider_client.py", line 142, in call\n'
+    printf '    resp = self._session.post(url, json=payload, timeout=30)\n'
+    printf 'requests.exceptions.ConnectionError: HTTPSConnectionPool: Max retries exceeded\n'
+    exit 0 ;;
+  t024-form-08)
+    printf '\n\n\n'
+    printf '<!DOCTYPE html>\n<html>\n<head><title>502 Bad Gateway</title></head>\n'
+    printf '<body>\n<center><h1>502 Bad Gateway</h1></center>\n</body>\n</html>\n'
+    exit 0 ;;
+  t024-form-09)
+    printf '  {"error": {"code": "upstream_unavailable", "message": "the model backend\n'
+    printf '  is temporarily unavailable, retry later", "request_id": "req_00000042"}}\n'
+    printf '  no review was produced for this request\n'
+    exit 0 ;;
+  t024-form-10)
+    printf 'HTTP/1.1 502 Bad Gateway\n'
+    printf 'Server: nginx/1.24.0\nContent-Type: text/html\nContent-Length: 150\n'
+    printf '\n<html><head><title>502 Bad Gateway</title></head><body></body></html>\n'
     exit 0 ;;
   empty)
     exit 0 ;;

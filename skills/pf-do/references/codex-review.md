@@ -91,25 +91,75 @@ to sub-agents*: the slowest and least predictable spend, for a review we already
 get from `max`. The script downgrades `ultra` to `max` and says so, no matter
 whether the value came from the config, a flag or `--deep`.
 
-## Two review modes (the script picks for you)
+## One review mode, and why the native reviewer is gone (I-033)
 
-- **Without `--why`** — the native reviewer (`codex exec review --uncommitted|--base|--commit`), pinned to `sandbox_mode="read-only"`. Codex frames the review itself, so our blind spot never enters the prompt. Prefer this.
-- **With `--why "<focus>"`** — plain `codex exec` with the diff command written into the prompt. Needed because the CLI refuses a positional prompt together with any scope flag: `error: the argument '--uncommitted' cannot be used with '[PROMPT]'`. Same read-only sandbox, but the framing is now ours — use it only when you genuinely need a specific angle.
+Every run is plain `codex exec` with the diff command and the report format
+written into the prompt, `--sandbox read-only`. `--why "<focus>"` only adds one
+line of focus to that same prompt.
+
+Until T-024 the default pass used the **native** reviewer
+(`codex exec review --uncommitted|--base|--commit`), where Codex framed the
+review itself and our blind spot never entered the prompt. That is a real
+property and we gave it up on purpose, for one reason: the verdict now rests on
+**proof that a review happened** (the completion marker below), proof can only
+be *requested*, and `codex exec review` has no prompt slot at all — the CLI
+refuses a positional prompt together with any scope flag
+(`error: the argument '--uncommitted' cannot be used with '[PROMPT]'`). Keeping
+it would have left the path everybody uses with no proof at all.
+
+Price, plainly: the framing is ours now (deliberately neutral — no hypothesis,
+no focus, unless you pass `--why`). Gain: the output format is contractual on
+every path, which it never was for the native reviewer whose `[P1]/[P2]/[P3]`
+lines this script counted on faith.
 
 ## Reading the result — four traps
 
 - **Exit code is always 0 when a review actually completed**, findings or not.
   The verdict is in the text: `[P1]`/`[P2]`/`[P3]` markers. Never infer "clean"
   from the exit code alone.
-- **Zero findings is not automatically "clean".** If Codex exits 0 with no
-  `[P1]`/`[P2]`/`[P3]` lines AND the text matches a known provider/CLI failure
-  signature (auth errors, rate limits, timeouts, a stack trace, …), the script
-  reports `FAIL: not reviewed` instead of `OK: … 0 findings` — a wrapper-level
-  error should never be indistinguishable from "nothing to report". This is a
-  disclosed heuristic (a denylist of known failure phrasing), not a formal
-  contract with the provider: it catches the failure shapes seen in practice,
-  not everything that could ever go wrong. When a "0 findings" result looks
-  surprising, read the report file before trusting it either way.
+- **Zero findings is not automatically "clean" — and now it has to be proven.**
+  Three tickets in a row (F-09 → T-020 → T-023) tried to list what a provider
+  failure *looks like*; each time the next gate found a shape that walked past
+  the list (a traceback starting on line 2, a CLI banner before the HTML, ANSI
+  colouring, a line of spaces). A list of failure signs cannot be closed, so
+  the question is inverted (I-033): not "does this look broken" but **"is there
+  proof this is a review"**.
+
+  The proof is a **completion marker**: the prompt requires the output to end
+  with exactly `CODEX-REVIEW-COMPLETE: <N>`, where `<N>` is the number of
+  `[P1]/[P2]/[P3]` finding lines (`0` when clean). The verdict ladder:
+
+  | Output | Verdict |
+  |---|---|
+  | marker present, `<N>` = counted findings | `OK` — proven review |
+  | marker present, `<N>` ≠ counted findings | `FAIL: not reviewed` (out of sync with its own sign-off — typically truncated) |
+  | marker broken / cut mid-token | `FAIL: not reviewed` (truncation outweighs any findings above it) |
+  | no marker, but ≥1 well-formed `- [P1|P2|P3] … — file:lines` line | `OK` + a loud `NOTE` — accepted on report structure |
+  | anything else | `FAIL: not reviewed`, whatever the text looks like |
+
+  The fourth row is the backup proof, and it is **positive** evidence (a report
+  has finding lines) rather than another denylist — no provider dump contains
+  such a line, so it does not reopen the hole. It covers reviews *with*
+  findings only: a clean review where the model forgot the marker gets a loud
+  `FAIL`. That is the deliberate trade — being unable to verify must be a
+  noisy state, never a silent "ok". Known soft spot, stated rather than hidden:
+  a review with findings truncated *before* the marker even starts reads as
+  `OK` + `NOTE`.
+
+  The old detectors (word signature + error-envelope shape) are still there,
+  demoted to a second echelon: they no longer decide anything, they add a
+  `HINT:` line explaining *why* a failure probably happened ("looks like a
+  provider error"), which "no marker" alone would not say.
+
+- **`PF_CODEX_SENTINEL_OPTIONAL=1` — the emergency valve, and its price.** If
+  the provider ever starts cutting output tails, the marker would fail every
+  honest run. Setting this variable stops the marker from being the verdict and
+  hands it back to the second echelon; the run prints a loud `NOTE` and repeats
+  it in the report. **The price is the entire T-024 guarantee**: with it set, a
+  silent provider failure can again read as a clean review — exactly the hole
+  three tickets failed to close by other means. Use it as a temporary bridge
+  while the prompt is fixed, never as a default; if the marker is genuinely
+  unobtainable, that is a blocker worth raising, not a setting worth keeping.
 - **An empty report means the run died**, not that the code is clean. Codex emits
   nothing until it finishes, so a killed process leaves a silently empty file.
   The watchdog sends SIGTERM at the effort's budget and SIGKILL `PF_CODEX_GRACE`
@@ -141,6 +191,11 @@ codex exec --skip-git-repo-check review --uncommitted \
   -m gpt-5.6-luna --config model_reasoning_effort="max" \
   </dev/null > report.md 2>report.stderr
 ```
+
+That raw form is the **native** reviewer, which the script itself no longer
+uses (see "One review mode" above): run by hand it produces no completion
+marker, so nothing verifies that what you got is a review rather than an error
+page — read the output yourself before calling anything clean.
 
 `</dev/null` is not optional: `codex exec` always reads stdin and hangs forever
 when stdin is neither a TTY nor closed (hooks, background tasks, scripts). The

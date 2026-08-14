@@ -249,22 +249,41 @@ rm -f "$calllog"; rm -rf "$repo"
 # ===========================================================================
 group "F-09: unrecognized non-empty output must read as FAIL: not reviewed, not 0 findings"
 # ===========================================================================
+# f09_case <fake-codex mode> <expect: ok|fail-not-reviewed> <desc>
+#            [expect-hint: hint|nohint] [extra env assignments...]
+#
+# The 4th argument (I-033/T-024) asserts on the SECOND ECHELON's `HINT:` line
+# rather than on the verdict: since the whitelist decides the verdict, the old
+# length/shape detectors now only shape the WORDING of a failure. Pinning the
+# hint is what keeps ERR_SHAPE_CHARS honest — raise the threshold and the
+# "one byte over" case starts printing a hint it must not print.
 f09_case() {
-  local mode="$1" expect="$2" desc="$3"
+  local mode="$1" expect="$2" desc="$3" expect_hint="${4:-}"
+  shift 4 2>/dev/null || shift $#
+  local envs=("FAKE_CODEX_MODE=$mode")
+  local e
+  for e in "$@"; do envs+=("$e"); done
   local repo; repo="$(new_repo)"
   consent_file "$repo" '{"enabled": true}'
   echo "x=1" > "$repo/change.sh"
   local out rc
-  out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=$mode" -- --scope uncommitted 2>&1 )"
+  out="$( cd "$repo" && sut_run 10 "$MP_JQ" "${envs[@]}" -- --scope uncommitted 2>&1 )"
   rc=$?
   local got=""
   if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed'; then got="fail-not-reviewed"
   elif printf '%s' "$out" | grep -qE '^OK:.*'; then got="ok"
   fi
-  if [ "$got" = "$expect" ]; then
-    pass "$desc -> $got (rc=$rc)"
+  local ok=1 reason=""
+  [ "$got" = "$expect" ] || { ok=0; reason="got '$got', expected '$expect'"; }
+  if [ -n "$expect_hint" ]; then
+    local got_hint="nohint"
+    printf '%s' "$out" | grep -q '^HINT:' && got_hint="hint"
+    [ "$got_hint" = "$expect_hint" ] || { ok=0; reason="$reason; second echelon: got '$got_hint', expected '$expect_hint'"; }
+  fi
+  if [ "$ok" = 1 ]; then
+    pass "$desc -> $got${expect_hint:+/$expect_hint} (rc=$rc)"
   else
-    fail "$desc -> got '$got', expected '$expect' (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
+    fail "$desc -> $reason (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
   fi
   rm -rf "$repo"
 }
@@ -303,8 +322,117 @@ f09_case clean-quotes-json-error ok "clean review whose prose quotes a JSON erro
 # T-020 gate hygiene: pin the ERR_SHAPE_CHARS boundary itself so raising it
 # later cannot slip past unnoticed (previously only a fixture that clears
 # it with room to spare — clean-security-prose, 382 bytes — existed).
-f09_case boundary-chars-at fail-not-reviewed "word-signature output at exactly ERR_SHAPE_CHARS (300 bytes) -> still gated in (off-by-one, T-020 hygiene)"
-f09_case boundary-chars-over ok "word-signature output one byte past ERR_SHAPE_CHARS (301 bytes) -> gated out, not structural either (off-by-one, T-020 hygiene)"
+#
+# I-033 (T-024): both of these are now FAIL — neither carries the completion
+# marker, and under the success contract that alone decides. What the boundary
+# still governs is the second echelon's explanation, so the assertion moved
+# there: at 300 bytes the word signature still fires (hint), at 301 it does
+# not (nohint). Raising ERR_SHAPE_CHARS still turns the second case red.
+f09_case boundary-chars-at fail-not-reviewed "word-signature output at exactly ERR_SHAPE_CHARS (300 bytes) -> still gated in (off-by-one, T-020 hygiene)" hint
+f09_case boundary-chars-over fail-not-reviewed "word-signature output one byte past ERR_SHAPE_CHARS (301 bytes) -> gated out, not structural either (off-by-one, T-020 hygiene)" nohint
+
+# ===========================================================================
+group "I-033: the verdict is proof of review (marker), not absence of error signs"
+# ===========================================================================
+# The ten shapes the T-023 gate measured walking past the denylist — every one
+# exits 0, none carries the marker, none contains a well-formed finding line.
+# Not one detector below was written for their shapes: they fail because
+# nothing proves a review happened. That is the whole point of the inversion.
+f09_case t024-form-01 fail-not-reviewed "form 01: 'Error occurred while contacting provider:' then a traceback from line 2"
+f09_case t024-form-02 fail-not-reviewed "form 02: CLI banner + blank line, then an HTML error page"
+f09_case t024-form-03 fail-not-reviewed "form 03: 'provider response:' then a JSON error envelope"
+f09_case t024-form-04 fail-not-reviewed "form 04: '---' then a traceback"
+f09_case t024-form-05 fail-not-reviewed "form 05: 'Reviewing 3 files...' then an 18-line internal dump"
+f09_case t024-form-06 fail-not-reviewed "form 06: ANSI-coloured traceback (escape bytes before the first visible char)"
+f09_case t024-form-07 fail-not-reviewed "form 07: a line of spaces, then a traceback"
+f09_case t024-form-08 fail-not-reviewed "form 08: blank lines only, then an HTML error page"
+f09_case t024-form-09 fail-not-reviewed "form 09: indented '  {\"error\":' envelope"
+f09_case t024-form-10 fail-not-reviewed "form 10: 'HTTP/1.1 502 Bad Gateway' as the first line"
+
+# Honest reviews that signed off properly must stay OK — the whole risk of a
+# whitelist is false refusals, so this half matters as much as the half above.
+# (clean / success / clean-security-prose / clean-quotes-* in the F-09 group
+# are honest fixtures too: they now emit the marker, so they cover the same
+# contract from the regression side.)
+f09_case clean-oneline ok "honest one-line clean review: nothing but the marker (length no longer means anything)"
+f09_case findings-multi ok "honest review with three findings, marker count 3 matches the report"
+
+# Broken sign-offs.
+f09_case sentinel-count-mismatch fail-not-reviewed "marker claims 3 findings, 1 finding line present -> desync, not 'clean'"
+f09_case truncated-marker fail-not-reviewed "output cut mid-marker ('CODEX-REVIEW-COMPL') with findings present -> FAIL, truncation beats the backup proof"
+f09_case clean-no-marker fail-not-reviewed "model forgot the marker on a clean review -> loud FAIL by design (never a silent 'clean')"
+
+# Backup proof: well-formed finding lines. Positive evidence of report
+# structure, not a guess about what an error looks like.
+i033_note_case() {
+  local mode="$1" expect="$2" desc="$3"; shift 3
+  local repo; repo="$(new_repo)"
+  consent_file "$repo" '{"enabled": true}'
+  echo "x=1" > "$repo/change.sh"
+  local out rc
+  out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=$mode" "$@" -- --scope uncommitted 2>&1 )"
+  rc=$?
+  local got=""
+  if printf '%s' "$out" | grep -qE '^FAIL:.*not reviewed'; then got="fail-not-reviewed"
+  elif printf '%s' "$out" | grep -qE '^OK:.*'; then got="ok"
+  fi
+  local ok=1 reason=""
+  [ "$got" = "$expect" ] || { ok=0; reason="got '$got', expected '$expect'"; }
+  printf '%s' "$out" | grep -q '^NOTE:' || { ok=0; reason="$reason; no loud NOTE line on stdout"; }
+  if [ "$ok" = 1 ]; then
+    pass "$desc -> $got + NOTE (rc=$rc)"
+  else
+    fail "$desc -> $reason (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|')"
+  fi
+  rm -rf "$repo"
+}
+i033_note_case findings-no-marker ok "marker missing but two well-formed finding lines -> accepted on structure, with a loud NOTE"
+
+# Emergency relief valve: the marker stops being the verdict, the second
+# echelon decides again — loudly, and at the stated price.
+i033_note_case clean-no-marker ok "PF_CODEX_SENTINEL_OPTIONAL=1: clean review without a marker -> OK again, with a loud NOTE" "PF_CODEX_SENTINEL_OPTIONAL=1"
+i033_note_case error-rc0 fail-not-reviewed "PF_CODEX_SENTINEL_OPTIONAL=1: a known failure shape is still caught by the second echelon" "PF_CODEX_SENTINEL_OPTIONAL=1"
+
+# ===========================================================================
+group "I-033 negative control: strip the marker requirement from the prompt -> honest fixtures must go red"
+# ===========================================================================
+# Proves the verdict genuinely rests on the marker rather than on something
+# incidental. The SUT is copied, the MANDATORY paragraph is cut out of the
+# prompt (the checker stays untouched), and the prompt-aware double then stops
+# signing off — exactly as a model that was never asked would.
+NEGCTL="$WORKROOT/codex-review-no-sentinel.sh"
+sed -e "/^MANDATORY, no exceptions:/,/^discarded as 'not reviewed', however good the review itself was\.\"$/d" \
+    -e 's/^real defect, P3 = worth fixing\. Report nothing you cannot point to in the diff\.$/&"/' \
+    "$SUT" > "$NEGCTL"
+# Guard: a reworded prompt must break this group loudly instead of silently
+# turning it into a no-op that "passes" while cutting nothing.
+if cmp -s "$SUT" "$NEGCTL"; then
+  echo "harness setup: the negative control cut nothing out of $SUT — the prompt wording changed, update the sed above" >&2
+  exit 90
+fi
+if ! "$BASH_BIN" -n "$NEGCTL" 2>/dev/null; then
+  echo "harness setup: the negative control copy is not valid bash — update the sed above" >&2
+  exit 90
+fi
+# ...and the requirement really is gone from the PROMPT (the verdict code
+# below it must still mention the marker, or we cut too much).
+if grep -q 'MANDATORY, no exceptions' "$NEGCTL" || ! grep -q 'SENTINEL_LINE' "$NEGCTL"; then
+  echo "harness setup: the negative control cut the wrong lines — update the sed above" >&2
+  exit 90
+fi
+
+SUT_REAL="$SUT"
+SUT="$NEGCTL"
+# Clean reviews lose their only proof -> red, every one of them.
+f09_case clean fail-not-reviewed "negative control: honest clean review, requirement removed -> red"
+f09_case clean-oneline fail-not-reviewed "negative control: one-line clean review, requirement removed -> red"
+f09_case clean-security-prose fail-not-reviewed "negative control: long clean auth/rate-limit prose, requirement removed -> red"
+f09_case clean-quotes-traceback fail-not-reviewed "negative control: clean review quoting a traceback, requirement removed -> red"
+# A review WITH findings stays green on purpose: the backup proof of report
+# structure is doing its job, and this row documents that boundary rather than
+# leaving it as an unstated soft spot.
+i033_note_case success ok "negative control boundary: a review WITH findings survives on structure alone, with a loud NOTE"
+SUT="$SUT_REAL"
 
 # ===========================================================================
 group "F-10: only a hex commit SHA reaches the diff command / prompt, never the raw ref"

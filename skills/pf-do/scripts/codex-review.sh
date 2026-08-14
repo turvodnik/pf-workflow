@@ -264,34 +264,46 @@ fi
 # </dev/null is mandatory: `codex exec` always reads stdin and hangs forever
 # when stdin is neither a TTY nor closed (hooks, background tasks, scripts).
 # 2>/dev/null drops the reasoning stream so the file holds the result only.
-if [ -z "$FOCUS" ]; then
-  # Native reviewer: Codex frames the review itself, so our blind spot does not
-  # leak into the prompt.
-  set -- exec --skip-git-repo-check review
-  case "$SCOPE" in
-    uncommitted) set -- "$@" --uncommitted ;;
-    base)        set -- "$@" --base "$BASE" ;;
-    commit)      set -- "$@" --commit "$COMMIT" ;;
-  esac
-  set -- "$@" -m "$MODEL" --config "model_reasoning_effort=\"$EFFORT\"" \
-    --config "sandbox_mode=\"read-only\""
-else
-  # `codex exec review` refuses a positional prompt together with any scope flag
-  # (--uncommitted / --base / --commit), so a focused pass goes through plain
-  # `codex exec` with the diff command spelled out. Same read-only sandbox.
-  case "$SCOPE" in
-    uncommitted) DIFF_CMD="git status --short --untracked-files=all && git diff HEAD (untracked files are NOT in that diff — read each '??' path from the status output before judging)" ;;
-    base)        DIFF_CMD="git diff $BASE...HEAD" ;;
-    commit)      DIFF_CMD="git show $COMMIT" ;;
-  esac
-  set -- exec --skip-git-repo-check --sandbox read-only \
-    -m "$MODEL" --config "model_reasoning_effort=\"$EFFORT\"" \
-    "Review the changes in this repository. Get them with: $DIFF_CMD
-Focus of this review: $FOCUS
-Report every problem on its own line as: - [P1|P2|P3] short title — file:lines
+# I-033 (T-024): every run now goes through plain `codex exec` with the prompt
+# spelled out — including the default, unfocused pass that used to use the
+# native reviewer (`codex exec review --uncommitted|--base|--commit`).
+#
+# Why the native reviewer had to go: the verdict is no longer "does this look
+# like an error" (a denylist that three tickets in a row failed to close) but
+# "is there proof a review happened" (SENTINEL below). That proof can only be
+# REQUESTED, and `codex exec review` has no prompt slot at all — the CLI
+# refuses a positional prompt together with any scope flag ("the argument
+# '--uncommitted' cannot be used with '[PROMPT]'"). Keeping it would leave the
+# default path — the one everybody uses — without any proof of review.
+#
+# The cost, stated plainly: Codex no longer frames the review itself, so our
+# framing (below) is what it sees. It is deliberately neutral — no focus, no
+# hypothesis — unless the caller passed --why. In exchange the output format
+# is contractual on every path, which it never was for the native reviewer
+# whose [P1]/[P2]/[P3] lines this script was already counting on faith.
+SENTINEL='CODEX-REVIEW-COMPLETE'
+case "$SCOPE" in
+  uncommitted) DIFF_CMD="git status --short --untracked-files=all && git diff HEAD (untracked files are NOT in that diff — read each '??' path from the status output before judging)" ;;
+  base)        DIFF_CMD="git diff $BASE...HEAD" ;;
+  commit)      DIFF_CMD="git show $COMMIT" ;;
+esac
+PROMPT="Review the changes in this repository. Get them with: $DIFF_CMD
+"
+[ -n "$FOCUS" ] && PROMPT="${PROMPT}Focus of this review: $FOCUS
+"
+# The marker requirement is the LAST line of the instruction on purpose: it is
+# the one part the model must not lose track of, and the wording pins exactly
+# what the number means, so an honest review cannot fail on an ambiguous count.
+PROMPT="${PROMPT}Report every problem on its own line as: - [P1|P2|P3] short title — file:lines
 followed by an indented explanation. P1 = breaks or endangers something, P2 =
-real defect, P3 = worth fixing. Report nothing you cannot point to in the diff."
-fi
+real defect, P3 = worth fixing. Report nothing you cannot point to in the diff.
+MANDATORY, no exceptions: the very last line of your output must be exactly
+$SENTINEL: <N>
+where <N> is the number of [P1]/[P2]/[P3] finding lines you wrote above. Write
+$SENTINEL: 0 when you found nothing. Output that lacks that final line is
+discarded as 'not reviewed', however good the review itself was."
+set -- exec --skip-git-repo-check --sandbox read-only \
+  -m "$MODEL" --config "model_reasoning_effort=\"$EFFORT\"" "$PROMPT"
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXXXX")" || skip "cannot create temp file"
 ERR="$(mktemp "${TMPDIR:-/tmp}/codex-review-err.XXXXXXXX")" || skip "cannot create temp file"
@@ -391,67 +403,120 @@ P2=$(grep -cE '^[-*] +\[P2\]' "$OUT" || true)
 P3=$(grep -cE '^[-*] +\[P3\]' "$OUT" || true)
 TOTAL=$(( P1 + P2 + P3 ))
 
-# F-09: `codex exec review` exits 0 whether it reviewed anything or not, so a
-# provider/CLI failure that lands on stdout (auth errors, rate limits, a
-# crashed sub-process) previously read as "0 findings" — indistinguishable
-# from a genuinely clean review. Zero findings AND text that matches a known
-# failure signature is reclassified as "not reviewed", never "clean".
+# --- The verdict: proof of review, not absence of error signs (I-033) --------
+# Three tickets (F-09 -> T-020 -> T-023) tried to enumerate what a provider
+# failure LOOKS like. Each time the next gate found a shape that walked past
+# the list: a traceback starting on line 2, a CLI banner before the HTML, ANSI
+# colouring, a line of spaces. The conclusion we paid for three times: a list
+# of failure signs cannot be closed, because there are unlimited ways to begin
+# a dump of text. So the question is inverted — not "does this look broken"
+# but "is there proof this is a review". The proof is the marker the prompt
+# above demands. Everything else, at any length and in any shape, is
+# 'not reviewed'.
 #
-# I-022: the word list alone over-fired — a genuine review of code that
-# handles auth or rate limiting uses these exact words in its own prose and
-# got a false FAIL. Fix is shape, not more words: a real provider/CLI failure
-# is short and unstructured (one line, no report), a real review — even a
-# clean one — reads longer. So the signature only counts when the RAW output
-# is both terse (<= ERR_SHAPE_LINES non-empty lines, <= ERR_SHAPE_CHARS
-# characters) AND matches a signature; a longer or multi-line block that
-# happens to contain these words is left alone. Disclosed heuristic, not a
-# formal contract: it catches the concrete failure shapes seen in practice
-# (short stdout dumps), not everything that could go wrong — an extremely
-# short genuine review that itself uses one of these words can still
-# misfire, and a verbose multi-paragraph provider error can now slip past;
-# read the report when a result looks surprising.
+# The old detectors are kept, but demoted: they no longer decide anything,
+# they only explain a failure to the human ("this looks like a provider
+# error"), which "no marker" alone would not. Their history, kept because it
+# explains their shape:
+#   * F-09 — the original word list: a provider failure on stdout with exit 0
+#     read as "0 findings", indistinguishable from a clean review.
+#   * I-022 (T-020) — the word list alone over-fired on a genuine review of
+#     auth/rate-limit code, which uses those very words. Hence the length gate:
+#     the words only count in output that is also terse and unstructured.
+#   * I-031 (T-023) — the length gate let long dumps (tracebacks, HTML error
+#     pages) through, so a second, length-independent check anchored to the
+#     FIRST non-empty line was added: quoted examples inside review prose never
+#     land there, raw envelopes always do.
+# As hints, both are free to be imperfect — an imperfect explanation costs
+# nothing now that it no longer decides the verdict.
 FAILURE_SIGNATURE='(^|[^A-Za-z])(auth(entication)?[ _-]?fail(ed|ure)?|unauthori[sz]ed|forbidden|rate[ -]?limit(ed)?|quota[ -]?exceeded|invalid[ _-]?api[ _-]?key|no such (model|provider)|(connection|network) (refused|reset|error)|internal server error|bad gateway|service unavailable|gateway timeout|request timed out|traceback \(most recent call last\)|unhandled exception|panic:|fatal error)([^A-Za-z]|$)'
+STRUCT_SIGNATURE='^[[:space:]]*(Traceback \(most recent call last\):|<!DOCTYPE[[:space:]]+html|<html[ >]|\{"error"[[:space:]]*:|HTTP/1\.[01][[:space:]]+[45][0-9][0-9])'
 ERR_SHAPE_LINES=3
 ERR_SHAPE_CHARS=300
 RAW_LINES="${RAW_LINES:-0}"; RAW_CHARS="${RAW_CHARS:-0}"
 case "$RAW_LINES" in ''|*[!0-9]*) RAW_LINES=0 ;; esac
 case "$RAW_CHARS" in ''|*[!0-9]*) RAW_CHARS=0 ;; esac
-if [ "$TOTAL" = 0 ] && [ "$RAW_LINES" -le "$ERR_SHAPE_LINES" ] \
-   && [ "$RAW_CHARS" -le "$ERR_SHAPE_CHARS" ] \
-   && printf '%s\n' "$RAW_BODY" | grep -qiE "$FAILURE_SIGNATURE"; then
-  echo "FAIL: not reviewed — Codex exited 0 with no findings, and the short, unstructured output matches a known error/failure pattern, not a completed review."
-  echo "REPORT: $OUT (raw output kept for inspection)"
-  printf '%s\n' "$RAW_BODY" | grep -iE "$FAILURE_SIGNATURE" | head -3
-  exit 1
-fi
-
-# I-031: the length gate above (needed to stop I-022's over-firing on
-# ordinary prose) has a cost — a raw error dump that happens to run past
-# ERR_SHAPE_LINES/ERR_SHAPE_CHARS slips through as "0 findings, clean" even
-# though it is still just an error, not a review. A python traceback, an
-# HTML error page, and its minified one-line form were all measured doing
-# exactly this (T-023 gate). Length is the wrong signal for these three —
-# what actually marks them is that the raw output OPENS with the error's
-# own envelope instead of review prose. So this check is structural and
-# position-anchored to the first non-empty line, not a body-wide word
-# search, and it applies at ANY length — no ERR_SHAPE_LINES/CHARS gate.
-#
-# Why anchoring to the first line and not "no [P1]/[P2]/[P3] markers": an
-# honest, genuinely clean review has no markers by definition — treating
-# "no findings" as "not a report" would flip F-09 inside out and fail every
-# clean review. A review's prose can also legitimately QUOTE a traceback
-# line or an HTML tag as an example without the raw output ITSELF being
-# that traceback/page — that case must stay OK, and staying OK is exactly
-# what anchoring to the first line buys: quoted text never lands on line 1
-# of a report that opens with its own sentence.
-STRUCT_SIGNATURE='^[[:space:]]*(Traceback \(most recent call last\):|<!DOCTYPE[[:space:]]+html|<html[ >]|\{"error"[[:space:]]*:|HTTP/1\.[01][[:space:]]+[45][0-9][0-9])'
 RAW_FIRST_LINE="$(printf '%s\n' "$RAW_BODY" | grep -m1 '.' || true)"
-if [ "$TOTAL" = 0 ] \
-   && printf '%s' "$RAW_FIRST_LINE" | grep -qiE "$STRUCT_SIGNATURE"; then
-  echo "FAIL: not reviewed — Codex exited 0 with no findings, and the raw output opens with the shape of a traceback/HTML/JSON error envelope, not review prose."
+
+# Second echelon: prints a human-readable hint when the raw output also
+# matches one of the old error shapes, and says nothing otherwise. Its return
+# code is meaningful (0 = matched) so the relaxed mode below can reuse it.
+second_echelon_hint() {
+  if [ "$RAW_LINES" -le "$ERR_SHAPE_LINES" ] && [ "$RAW_CHARS" -le "$ERR_SHAPE_CHARS" ] \
+     && printf '%s\n' "$RAW_BODY" | grep -qiE "$FAILURE_SIGNATURE"; then
+    echo "HINT: this also looks like a provider/CLI failure — short, unstructured output matching a known error pattern:"
+    printf '%s\n' "$RAW_BODY" | grep -iE "$FAILURE_SIGNATURE" | head -3
+    return 0
+  fi
+  if printf '%s' "$RAW_FIRST_LINE" | grep -qiE "$STRUCT_SIGNATURE"; then
+    echo "HINT: this also looks like a provider/CLI failure — the raw output opens with a traceback/HTML/JSON error envelope, not review prose:"
+    printf '%s\n' "$RAW_BODY" | head -3
+    return 0
+  fi
+  return 1
+}
+
+not_reviewed() {
+  echo "FAIL: not reviewed — $1"
   echo "REPORT: $OUT (raw output kept for inspection)"
-  printf '%s\n' "$RAW_BODY" | head -3
+  second_echelon_hint || true
   exit 1
+}
+
+# A complete marker line: the token, a colon, a number, nothing else. `tail -1`
+# because a review may legitimately quote the format earlier in its prose (this
+# very script's diff, for instance) — the last one is the one it signed off with.
+SENTINEL_LINE="$(printf '%s\n' "$RAW_BODY" | grep -E "^[[:space:]]*$SENTINEL:[[:space:]]*[0-9]+[[:space:]]*$" | tail -1)"
+SENTINEL_N=""
+[ -n "$SENTINEL_LINE" ] && SENTINEL_N="$(printf '%s' "$SENTINEL_LINE" | sed -E 's/[^0-9]//g')"
+SENTINEL_SEEN=0
+printf '%s\n' "$RAW_BODY" | grep -qF "$SENTINEL" && SENTINEL_SEEN=1
+# Truncation that lands INSIDE the token leaves no whole token to find — the
+# tail then reads as a fragment like "CODEX-REVIEW-COMPL". So the last
+# non-empty line is also checked against the token's prefixes. The 8-character
+# floor keeps an ordinary sentence from ever qualifying; nothing shorter is
+# evidence of anything.
+SENTINEL_CUT=0
+LAST_LINE="$(printf '%s\n' "$RAW_BODY" | grep '.' | tail -1)"
+LAST_TRIM="$(printf '%s' "$LAST_LINE" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+if [ "${#LAST_TRIM}" -ge 8 ]; then
+  case "$SENTINEL" in "$LAST_TRIM"*) SENTINEL_CUT=1 ;; esac
+fi
+# Emergency relief valve (documented in references/codex-review.md together
+# with its price): if the provider ever starts truncating tails, this stops the
+# marker from being the verdict and hands it back to the second echelon.
+RELAX=0
+case "${PF_CODEX_SENTINEL_OPTIONAL:-}" in 1|true|yes|on) RELAX=1 ;; esac
+
+if [ -n "$SENTINEL_LINE" ] && [ "$SENTINEL_N" = "$TOTAL" ]; then
+  : # Proven: the review ran and signed off with a count that matches the report.
+elif [ "$RELAX" = 1 ]; then
+  RELAX_NOTE="NOTE: PF_CODEX_SENTINEL_OPTIONAL is set — the completion marker is not required for this run. Price: without it a silent provider failure can again read as a clean review; only the old shape heuristics are left."
+  echo "$RELAX_NOTE"
+  printf '\n%s\n' "$RELAX_NOTE" >> "$OUT" 2>/dev/null || true
+  if [ "$TOTAL" = 0 ]; then
+    HINT_OUT="$(second_echelon_hint)" && {
+      echo "FAIL: not reviewed — the marker requirement is relaxed, but the output still matches a known failure shape."
+      echo "REPORT: $OUT (raw output kept for inspection)"
+      printf '%s\n' "$HINT_OUT"
+      exit 1
+    }
+  fi
+elif [ -n "$SENTINEL_LINE" ]; then
+  not_reviewed "the completion marker says $SENTINEL_N finding(s), but $TOTAL finding line(s) are present — the output is out of sync with its own sign-off (typically a truncated report)."
+elif [ "$SENTINEL_SEEN" = 1 ] || [ "$SENTINEL_CUT" = 1 ]; then
+  not_reviewed "the completion marker is there but broken — no complete '$SENTINEL: <N>' line, the output ends mid-marker. A corrupted sign-off outweighs any finding lines above it: the report is truncated."
+elif [ "$TOTAL" -gt 0 ]; then
+  # Backup proof that this IS a report: well-formed finding lines. Positive
+  # evidence of structure, not a guess about what an error looks like — no
+  # provider dump contains "- [P2] title — file:lines". It covers reviews WITH
+  # findings only; a clean review without the marker still fails, loudly and
+  # on purpose (better a noisy false alarm than a silent "clean").
+  BACKUP_NOTE="NOTE: the completion marker is missing, but $TOTAL well-formed finding line(s) prove this is a report — accepted on structure. Tell the model to keep the final $SENTINEL line."
+  echo "$BACKUP_NOTE"
+  printf '\n%s\n' "$BACKUP_NOTE" >> "$OUT" 2>/dev/null || true
+else
+  not_reviewed "no '$SENTINEL: <N>' line in the output, so there is no proof a review ran at all. Anything without that marker is treated as 'not reviewed', whatever the text looks like."
 fi
 
 echo "OK: Codex review finished in ${ELAPSED}s ($MODEL/$EFFORT, $CODE_COUNT code files)"
