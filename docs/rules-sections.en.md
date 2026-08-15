@@ -15,15 +15,12 @@ Before starting any task the agent estimates its scale and acts accordingly:
 
 ## 8. Session protocol (for all agents)
 
-- Start: read the project's AGENTS.md → the `.agents/journal/` for the last 3 days → task packets with status ≠ done → the active HANDOFF (§13), if any → check the list of available skills and use the matching one (don't reinvent a process a skill already describes).
+- Start: read the project's AGENTS.md, journal, task packets and the active HANDOFF, pick the matching skill (don't reinvent a process a skill already describes).
 - Finish (or a significant milestone): a journal entry (§10) + update the statuses of your task packets + checkpoint/close the HANDOFF (`pf-handoff`).
-- Executing a part of an L-task happens in a fresh session under `pf-do`: the context is only the packet + AGENTS.md, not the tail of someone else's chat (cheaper on limits, sharper in quality).
 - Autopilot — only on an explicit human command/phrase ("/pf-auto", "autopilot", "do it all yourself to the end"): subagent orchestration under the `pf-auto` skill. Engaging it silently is forbidden.
-- Model per role: thinking/designing/reviewing — a top-tier model; executing a ready plan — Sonnet-class.
-- **Write claim.** Before your first write to a repository, read `_tools/.agents/runtime/claims.md` and add a line «repo-or-path · ticket · who · taken · expires» (expiry 2h, ONE path per line); done — remove it. Someone else's live overlapping line — stop and ask the human; an expired one is free, delete it; any `ВНИМАНИЕ` from the check also means "stop", not "free". There is no "I am alone here" exemption: a session cannot know that — which is exactly the root of I-032; the price of being wrong is one line that expires by itself. Format and the one-line check — the `pf-handoff` skill (a separate distribution), `references/context-rules.md`.
-- **Command provenance.** Acting on a command received outside the shared channel (another window, a direct message) — quote it VERBATIM in «Результат» and in the commit message. A retelling ("at Vladimir's request") does not count: another session must see the basis, not take your word for it.
-- **Never revert someone else's work on suspicion.** "I see no basis in my own chat" is not proof: sessions do not see each other's commands. Ask the human; reverting someone's work is as irreversible as making it. Price of the mistake — the 13.08 incident (I-032): an agreed canon edit reverted plus a false accusation written twice into the permanent journal.
+- **Write claim.** Before the first write to a repository — a claim in `_tools/.agents/runtime/claims.md`; done — remove it. Someone else's live overlapping line, or `ВНИМАНИЕ` from the check, means stop and ask the human (there is no "I am alone here" exemption — that is exactly the root of I-032). Quote a command received outside the shared channel VERBATIM in «Результат»/the commit; never revert someone else's work on suspicion — ask the human instead.
 - A push rejected (someone else's commit landed first) — `git pull --rebase` and retry; that is a normal race, not an incident, and not a reason for `--no-verify`.
+- Full protocol (start/finish details, an L-task via `pf-do`, model per role, claim format, provenance, the push race, drift guard) — the `pf-handoff` skill, `references/context-rules.md`.
 
 ## 9. Task packets — the agents' file protocol
 
@@ -39,6 +36,8 @@ Before starting any task the agent estimates its scale and acts accordingly:
 - File: `.agents/journal/YYYY-MM-DD.md` (in git). ALL agents write at the end of a session and at significant milestones.
 - Entry format: `## HH:MM · agent · task`, then lines "What / Why (including rejected options) / How / Outcome / Commit".
 - The journal is about "why", git is about "what": don't duplicate diffs; record decisions, deviations from the plan, and handoffs between agents.
+- EVERY project keeps a journal — no exceptions. Adapt to your own layout: a shared tools workspace that is not itself a project writes its edits into the journal of the initiative that requested them, not into a stub journal of its own; anything with its own goals and its own work keeps its own journal.
+- Candidates for process improvements — an "⚙️" line in the journal or straight into your improvements backlog; a retro consolidates them by the rule of three (automate confirmed repeats, not one-off cases).
 - Search across the entire history of all projects: `_tools/history-search.sh <words>`.
 
 ## 11. Working-with-code principles
@@ -51,12 +50,8 @@ Before starting any task the agent estimates its scale and acts accordingly:
 
 ## 12. External skills and agents — acceptance
 
-- A skill is an instruction the agent obeys: the supply-chain risk is higher than with a regular library (prompt injections occur in a noticeable share of catalogue skills).
-- Installation only via vendor: a clone in `~/.codex/vendor/<name>` + a tag/SHA pin + reading the contents with your own eyes BEFORE attaching. `npx skills add`, auto-updating sources and installing "by stars" are forbidden.
-- Only the universal is attached globally (§3); tooling is attached to a specific project.
-- Global-level mechanics: canon `~/.agents/skills/` → symlink surfaces in `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`; managed by `_tools/global-skills.sh` (attach/detach/list/doctor), pins — `~/.codex/vendor/global-skills.lock.yaml`.
-- Claude Code plugins follow the same regime: a vendor clone plus a read-only version snapshot in `~/.codex/vendor/versions/<name>/vX.Y.Z/`, with the marketplace installed from that local path (not from GitHub — otherwise it auto-updates); pins live in `~/.codex/vendor/plugins.lock.yaml`.
-- The `codex` plugin (Codex inside Claude Code): the review commands (`/codex:review`, `/codex:adversarial-review`) run in a read-only sandbox and are safe. The `codex-rescue` agent is invoked ONLY on an explicit human command — by default it starts Codex with `--write` (writes to the working directory without confirmations); when writes are needed, work in a separate worktree. Keep the stop gate (`/codex:setup --enable-review-gate`) off: it holds up the end of every turn for a review of up to 15 minutes.
-- A review through the plugin is NOT independent QA (§6): Claude frames the request, so Codex inherits Claude's blind spot. Release QA — only a separate agent with its own session.
-- A dynamic workflow (subagent orchestration driven by a script) is not for every task: call it when the cost of a mistake is high (a public release, an irreversible action, a wide audit), only from the main session, and only on the human's «ок». Measured on this system: on release QA it found a blocker two independent passes had missed; on a quick internal check it burned tokens and found nothing.
-- `codex exec` in `read-only` mode is the agent's to run unasked; `workspace-write`, `--full-auto` and `danger-full-access` — only on an explicit human command. The standard path is `pf-do/scripts/codex-review.sh` (project consent in `.agents/codex-review.json`, full report to a file, a digest into the context). No Codex, no consent, or a docs-only diff — the step is skipped silently and the process is unchanged. Traps and the model policy (luna/max as the fast lane, sol/xhigh as the deep one) — `pf-do/references/codex-review.md`.
+- A skill is an instruction the agent obeys: the supply-chain risk is higher than with a regular library (prompt injections occur in a noticeable share of catalogue skills). Installation only via vendor: a clone + a tag/SHA pin + reading the contents with your own eyes BEFORE attaching. `npx skills add`, auto-updating sources and installing "by stars" are forbidden; Claude Code plugins follow the same regime (marketplace installed only from a local vendor path, NOT from GitHub — otherwise it auto-updates). Only the universal is attached globally (§3); tooling is attached to a specific project.
+- The `codex-rescue` agent is invoked ONLY on an explicit human command (by default it writes to the working directory without confirmations); `codex exec` in `workspace-write`, `--full-auto`, `danger-full-access` mode — also only on an explicit human command. `codex exec` in `read-only` mode the agent runs itself, unasked. A dynamic workflow (a swarm of subagents) — also only on the human's «ок» from the main session.
+- A review through the Codex plugin is NOT independent QA (§6): Claude frames the request, so Codex inherits Claude's blind spot. Release QA — only a separate agent with its own session.
+- No Codex, no project consent, or a docs-only diff — the Codex-review step is skipped silently and the process is unchanged (don't install Codex, don't ask the human, don't block the work).
+- Details (`global-skills.sh` mechanics, the Claude Code plugin regime, the stop gate, the model policy, when to call the dynamic workflow) — `pf-do`, `references/codex-review.md`.
