@@ -242,6 +242,38 @@ lines this script counted on faith.
   against the code before acting on it; state disagreement with evidence rather
   than deferring. Findings are input to your judgement, never an auto-fix queue.
 
+## Vendor mechanics and dynamic workflow policy (moved from canon §12, T-037)
+
+- **Global-level mechanics.** Canon lives at `~/.agents/skills/` → symlink
+  surfaces at `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`;
+  managed via `_tools/global-skills.sh` (attach/detach/list/doctor), pins in
+  `~/.codex/vendor/global-skills.lock.yaml`.
+- **Claude Code plugins** follow the same mode: a vendor clone plus a
+  read-only version snapshot at `~/.codex/vendor/versions/<name>/vX.Y.Z/`,
+  marketplace install from that local path (not from GitHub — that would
+  auto-update), pins in `~/.codex/vendor/plugins.lock.yaml`.
+- **The `codex` plugin** (Codex inside Claude Code): review commands
+  (`/codex:review`, `/codex:adversarial-review`) run sandboxed read-only and
+  are safe. The `codex-rescue` agent is invoked ONLY on an explicit human
+  command — by default it runs Codex with `--write` (writes to the working
+  folder without confirmation); if a write is needed, work in a separate
+  worktree. The stop-gate (`/codex:setup --enable-review-gate`) stays
+  disabled: it blocks the end of every turn on review for up to 15 minutes.
+- **Dynamic workflow** (scripted subagent orchestration) is not for every
+  task: call it when the price of a mistake is high (a public release, an
+  irreversible action, a wide audit), and only from the main session, with
+  the human's go-ahead. Verified 2026-08-13: on release QA it found a 🔴
+  beyond two independent passes; on a quick internal check it just burned
+  tokens with no findings.
+- **`codex exec` modes.** The agent runs `codex exec` in `read-only` mode on
+  its own, without asking; `workspace-write`, `--full-auto`,
+  `danger-full-access` are only on an explicit human command. The standard
+  path is `pf-do/scripts/codex-review.sh` (project consent in
+  `.agents/codex-review.json`, full report to a file, a digest into
+  context). No Codex, no consent, or a docs-only diff — the step is silently
+  skipped, the process doesn't change. Gotchas and model policy (luna/max —
+  fast lane, sol/xhigh — heavy) — this file.
+
 ## What a review is NOT
 
 It does not satisfy §6 (independent QA before a public release): same machine,
