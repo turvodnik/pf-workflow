@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: qa-hostile-ignores-author-tests
+context:
+  scaffold_script: scaffold.sh

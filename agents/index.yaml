@@ -1,0 +1,56 @@
+# agents/index.yaml — registry of domain-specific agent roles (pf-agents scaffold, T-117).
+#
+# pf-auto (skills/pf-auto/SKILL.md, step 3, "Role lookup") checks this file
+# before falling back to the standard pf-executor/pf-reviewer roles: an
+# entry matching the ticket's domain → dispatch that role's file instead;
+# no match, or this file absent → silently use the standard roles.
+#
+# Empty by design: the pf-agents distribution itself (a repository of
+# domain roles with their own experience/ and evals/) is Ф4 scope and is
+# NOT created by this ticket — only the lookup format is fixed here, ahead
+# of it, so pf-auto already knows where to look once it exists.
+#
+# Fields per entry under `roles`:
+#   domain:     short domain slug the ticket/task belongs to (e.g. "seo", "billing")
+#   role:       role name, matching the target agent file's frontmatter `name:`
+#   file:       role file path, relative to this index (i.e. agents/<file>)
+#   experience: path to that role's experience/ file (confirmed repeat mistakes,
+#               same convention as agents/experience/pf-executor.md); "" if none yet
+#   evals:      path to that role's eval suite; "" if none yet — root-of-
+#               THIS-REPO relative, same base as `file:`, but note the two
+#               repos this index.yaml ships in today are NOT laid out the
+#               same way: canon (_tools) keeps this file at
+#               `skill-library/agents/index.yaml` and cases at
+#               `skill-library/evals/<plugin>/<case>/` — a canon example is
+#               `skill-library/evals/pf-workflow/` (exists: T-144/T-145).
+#               A distribution repo (pf-workflow, pf-handoff) IS one
+#               plugin already, so `sync-from-tools.sh` drops that same
+#               canon directory at its OWN root `evals/`, with no
+#               `<plugin>/` subdir (one repo = one plugin = nothing to
+#               disambiguate) — a distribution example is `evals/` (exists
+#               today, but is shared by every role of that one plugin, so
+#               it never distinguishes them: pf-workflow's/pf-handoff's
+#               OWN roles legitimately keep `evals: ""` here and are found
+#               by `evals.sh --tag <role>` instead, T-146). `evals: <dir>`
+#               starts to mean something once a role's cases live under
+#               their OWN subdir — the FUTURE multi-role pf-agents
+#               distribution (Ф4, not this ticket) is the first place that
+#               is true, and there the value would be `evals/<role>/`.
+#   since:      date (YYYY-MM-DD) the entry was added
+#
+# To register a real role: replace `roles: []` below with `roles:`, then
+# uncomment each line of the example that follows it (remove the leading
+# "# ", keep the two-space indent as written) and fill in its values.
+# Uncommenting the example WITHOUT that replacement is invalid YAML — the
+# example is a list item, and `roles: []` already closes the list inline;
+# a bare `- domain: …` above or below it would be a second, unrelated
+# top-level node in the same document (verified: yaml.safe_load raises
+# ParserError on exactly that shape).
+
+roles: []
+#   - domain: seo
+#     role: seo-content-writer
+#     file: seo-content-writer.md
+#     experience: experience/seo-content-writer.md
+#     evals: ""
+#     since: 2026-09-16

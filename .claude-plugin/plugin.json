@@ -1,0 +1,10 @@
+{
+  "name": "pf-workflow",
+  "version": "2.0.0",
+  "description": "Spec-driven workflow toolkit for multi-agent CLI development: task packets, journal, retro, autopilot.",
+  "author": {
+    "name": "Pifagor Studio"
+  },
+  "license": "MIT",
+  "keywords": ["workflow", "task-packets", "spec", "autopilot", "multi-agent"]
+}

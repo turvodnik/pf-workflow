@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: autopilot-never-ends-with-wait
+context:
+  scaffold_script: scaffold.sh

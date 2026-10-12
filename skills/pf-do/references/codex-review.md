@@ -22,6 +22,8 @@ SC=$(ls ~/.claude/skills/pf-do/scripts/codex-review.sh ~/.codex/skills/pf-do/scr
 ```
 
 `--scope uncommitted` (default) | `--base <ref>` | `--commit <sha>`.
+Too large for one synchronous pass? `--async` + `--wait <marker>` — see
+"Long diffs" below; without those flags nothing about this script changes.
 Other flags: `--deep` (frontier model for milestone passes), `--out <file>`,
 `--why "<focus>"`, `--model`/`--effort` (debugging), `--yes` (skip asking when
 **no consent file exists yet** — only when the human just asked for the review
@@ -90,6 +92,161 @@ Legacy models cap at `xhigh`.
 to sub-agents*: the slowest and least predictable spend, for a review we already
 get from `max`. The script downgrades `ultra` to `max` and says so, no matter
 whether the value came from the config, a flag or `--deep`.
+
+## Long diffs: `--async` and `--wait`
+
+The synchronous run is clamped to **540s** — not because a review takes that
+long, but because every agent runs this script through a Bash tool that dies at
+600s (I-035). A large diff does not fit in 540s, so through most of August 2026
+the gate collected `FAIL:` after `FAIL:` and walked on: the pre-pass was
+effectively switched off exactly where it was most needed (retro 2026-09-03).
+
+```bash
+# 0. freeze what is being reviewed — a detached run reads the repository
+#    minutes from now, so commit first (pf-do step 7 allows several small
+#    commits). --scope uncommitted is for the SYNCHRONOUS call only.
+git commit -- <your files>
+
+# 1. start it and get on with the ticket
+bash "$SC" --async --commit <sha>
+# → PENDING: /…/workspace/runs/codex-review/2026-09-04-141210-commit-async-70735.md
+
+# 2. before closing the gate, read the verdict
+bash "$SC" --wait /…/2026-09-04-141210-commit-async-70735.md --timeout 500
+# → the ordinary OK:/SKIP:/FAIL: digest, and the ordinary exit code
+```
+
+What changes and what does not:
+
+- **`--async` detaches the run** (its own process group, `HUP` ignored, all
+  three streams redirected — no `setsid`, which macOS lacks, and no `nohup`).
+  The launching tool call returns in well under a second.
+- **No caller means no ceiling**, so the effort's full watchdog budget is
+  restored there (`max` → 1800s). The 540s constant is unchanged; it is simply
+  not applied where its stated precondition — "a Bash tool is about to kill us"
+  — is false.
+- **The marker file is the result; the sign-off is a second file.** The
+  background run appends its ordinary verdict line, then `ASYNC-DONE: <code>`,
+  and last of all writes the authoritative sign-off to `<marker>.done`.
+  `--wait` polls for that file, never for a line inside the marker.
+  The reason is not tidiness (P1, gate 2026-09-04): on a failed run this script
+  copies the tail of codex's stderr into its output, and that stream **echoes
+  the diff under review** — so a diff that adds a line reading `ASYNC-DONE: 0`
+  at column 0 (this feature's own diff does) would land in the marker and
+  satisfy a waiter that trusted it. Nothing but the EXIT trap writes `.done`,
+  and it writes it after the marker line, so `.done` existing proves both that
+  the run finished and that the marker is whole.
+- **A detached run executes a private copy of this script.** bash reads a script
+  incrementally, by byte offset, for as long as it runs — and a detached review
+  runs for up to half an hour. Edit the file in the skill directory during that
+  window and the child resumes at the same offset in different bytes, executing
+  a fragment of whatever now sits there. That is not hypothetical: on
+  2026-09-04 a neighbouring ticket's run died as
+  `codex-review.sh: line 725: already: command not found` — the word from
+  `--out $OUT already exists` — leaving no sign-off at all. The reviews most
+  likely to be long are reviews *of this skill*, run while somebody is editing
+  this skill, so the launcher snapshots the script to a temp file and runs that;
+  every chunk group gets the same edition, and the copy is deleted on the way
+  out (a SIGKILLed run leaves it in `$TMPDIR`, which is where temp files go).
+- **Without `--async` not one byte of behaviour changes.** pf-do step 5a and
+  pf-auto step 4 keep calling the script with no flags and get exactly what they
+  got before — pinned by a byte-comparison of 23 scenarios that includes the
+  diff command and the full prompt handed to codex, with a mutation control
+  proving the comparison is not vacuous (T-070).
+
+**Trap, found while dogfooding T-070 and confirmed by the gate: `--scope
+uncommitted` is a moving target, and asynchronously it is the wrong tool.** The
+prompt tells Codex to run the diff command *itself*, minutes after you launched
+it. Commit, stage or edit anything in the meantime and the detached run reviews
+a tree that no longer matches what you asked about. There are two ways that ends
+badly and they look different, so neither one warns you about the other:
+
+- **unchunked** — codex sees an emptied diff, honestly signs off
+  `CODEX-REVIEW-COMPLETE: 0`, and you get `OK: … FINDINGS: total 0`, exit 0.
+  A clean review of nothing.
+- **chunked** — a later group re-resolves the scope and answers
+  `SKIP: empty diff — nothing to review`. Since the gate fix of 2026-09-04 a
+  skipped group makes the whole run `FAIL`, so this one is at least loud.
+
+So: **an async run always takes an immutable scope** — `--async --commit <sha>`,
+or `--async --base <ref>`, whose *both* ends are resolved to shas at launch and
+handed to the child as shas (the child never re-resolves a name, and never
+resolves `HEAD` itself). `--scope uncommitted` stays synchronous only, where the
+window is seconds. pf-do step 5a says the same thing; if the two ever disagree,
+this file is describing the mechanism and `SKILL.md` is the instruction — fix
+whichever is stale rather than following one of them.
+
+### The rule: the gate does not close until the marker is read
+
+`PENDING:` is **not** a verdict. A ticket whose only evidence is a `PENDING:`
+line has not been reviewed — it has been *scheduled*. Whoever closes the gate
+(pf-do step 5a, pf-auto step 4) must show the output of a `--wait` on that
+marker, the same way any other verdict is shown.
+
+Three outcomes, three different meanings — do not collapse them:
+
+| Output | Meaning | What to do |
+|---|---|---|
+| `OK:` / `SKIP:` / `FAIL:` after `--wait` | the run finished, this is the verdict | as usual |
+| `FAIL: wait timeout` | **not finished yet** — nothing is known | re-run `--wait` on the same marker |
+| `<marker>.done` never appears | the run was **killed** | "not reviewed", never "clean" — re-run |
+
+A marker whose text ends in `ASYNC-DONE:` but that has no `.done` beside it is
+**not** a finished run — most likely it is a marker written by an older edition
+of this script, or reviewed content that happened to look like a sign-off.
+Re-run rather than read it.
+
+`FAIL: wait timeout` is deliberately exit 1: "still running" reported as success
+is the silent-success shape §11 forbids. The default is 900s, which was chosen
+against the old 540s clamp — with the full budget restored a legitimate run can
+outlast it, so the timeout means "look again", not "it died". Under an agent's
+Bash tool pass `--timeout 500` or less, otherwise the harness kills the wait
+itself (the marker survives, so this costs nothing but a repeat).
+
+### Chunking, and what it costs
+
+A diff with more code files than `ASYNC_CHUNK_MAX_FILES` (25, one constant in
+the script) is reviewed in groups of that size, one after another, and folded
+into one marker. Per-group lines are prefixed `chunk N/M | ` so that **exactly
+one line in the marker starts at column 0 with a verdict** — a reader grepping
+`^FAIL:` must never get an ambiguous answer.
+
+Aggregation is deliberately pessimistic: any group that produces no verdict
+makes the whole run `FAIL` and exit 1. "2 of 3 groups reviewed" is not a clean
+review. **A `SKIP:` counts as no verdict**, because that is what `SKIP:` means
+in this script's vocabulary — "no review happened here". The gate of
+2026-09-04 caught the opposite reading in the first edition: with two of three
+groups skipping onto an occupied `--out`, 20 files of 60 were reviewed and the
+run reported `OK:` and exit 0 — the sum-of-greens this script exists to refuse.
+
+The whole run also has a time cap, `ASYNC_CHUNK_TOTAL_BUDGET` (3600s), sitting
+next to the file threshold. Without it the ceiling was N × the per-call watchdog
+with nothing bounding N: 500 files is 20 groups, ten hours of background quota
+nobody is watching. Groups that have not started when the cap runs out do not
+start, and the run ends `FAIL: budget exhausted, k of N groups reviewed` — never
+as a verdict on the groups that happened to fit. The forecast is printed as a
+`NOTE:` when the run begins, so the price is visible before it is paid.
+Concurrent runs are not limited; the cost is stated, not rationed.
+
+With `--out X.md` a chunked run writes `X-chunk-1.md`, `X-chunk-2.md`, … and
+never `X.md` itself: one path cannot hold several reports, and handing the same
+one to every group would make all but the first refuse it (F-05) and silently
+shrink the review. Note also that the threshold counts **files, not lines** — a
+five-file, six-hundred-line diff is one pass, by design.
+
+`--async` answers synchronously, before printing `PENDING:`, for everything it
+can already know: no codex, not a repo, no consent, a docs-only or empty diff,
+and an `--out` that already exists. Everything discovered later (an unwritable
+output directory, for instance) still comes back honestly — but through the
+marker, so you pay a `--wait` round trip to hear it.
+
+The price, stated where it is paid: **a defect whose cause is in one group and
+whose symptom is in another is invisible to every single pass.** The aggregate
+prints a `NOTE:` saying so. Each group's prompt is told it is seeing part of a
+larger change and must not report a problem whose cause lies outside its file
+list — that suppresses the false positives, not the blind spot. If the diff is
+one coherent refactor across 60 files, a chunked pass is weaker than a
+synchronous one on 20; split the ticket instead.
 
 ## One review mode, and why the native reviewer is gone (I-033)
 
@@ -224,8 +381,14 @@ lines this script counted on faith.
   one more. Use it as a temporary bridge
   while the prompt is fixed, never as a default; if the marker is genuinely
   unobtainable, that is a blocker worth raising, not a setting worth keeping.
-- **An empty report means the run died**, not that the code is clean. Codex emits
-  nothing until it finishes, so a killed process leaves a silently empty file.
+- **A PENDING report means the run was killed from the outside**, not that the
+  code is clean. Codex emits nothing until it finishes, so an externally killed
+  run used to leave a silently empty (0-byte) file; the script now reserves the
+  report with a self-explaining `# Codex review PENDING` placeholder, and any
+  verdict — real review or internal-timeout FAIL — overwrites it. A report
+  still reading PENDING is the signature of an outer kill (agent Bash-tool
+  ceiling, closed session): the script never got to speak, and a stray `codex`
+  process may still be running.
   The watchdog sends SIGTERM at the effort's budget and SIGKILL `PF_CODEX_GRACE`
   seconds later (default 15, same override pattern as `PF_CODEX_TIMEOUT`), to
   the whole process group — no `pkill` involved, and the main script now always
@@ -299,7 +462,13 @@ symptom is zero bytes of output, zero CPU, forever. Send stderr to a file
 (`2>report.stderr`), not `/dev/null` — it carries the reasoning stream, and on
 a crash it is the only explanation you get (see the empty-report trap above).
 Timeouts by effort: low 150s, medium 300s, high 600s, xhigh 1200s, max/ultra
-1800s. Continue a session with
+1800s — but the script clamps the default budget to 540s, because every agent
+caller runs it through a Bash tool with a hard 600s ceiling: a longer watchdog
+never fires, the harness kills the script first, and the "review" vanishes as
+an empty report (a week of exactly that, 2026-08-22…28). A slow run now ends
+in an honest FAIL at ~540s with a hint; a human in a real terminal restores
+the full budget with `PF_CODEX_TIMEOUT=1800` (absolute override, unclamped).
+Continue a session with
 `echo "prompt" | codex exec --skip-git-repo-check resume --last 2>resume.stderr`
 (no flags allowed on resume — model, effort and sandbox are inherited).
 

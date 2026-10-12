@@ -654,4 +654,699 @@ else
 fi
 rm -f "$calllog"; rm -rf "$repo"
 
+# ===========================================================================
+group "I-035: agent-ceiling clamp (600s Bash-tool cap) + honest artifacts on killed runs"
+# ===========================================================================
+# Root cause (2026-08-28, one of the author's projects): default budgets (max=1800s,
+# xhigh=1200s) exceed the 600s hard ceiling of every agent's Bash tool, so
+# the harness killed the script before its own watchdog ever fired — leaving
+# a 0-byte report, no FAIL line, and an orphaned codex. Three properties are
+# pinned here: (1) the default budget fits under the ceiling, (2) an internal
+# watchdog FAIL overwrites the report so it self-explains, (3) an EXTERNAL
+# kill leaves a self-explaining PENDING placeholder, never zero bytes.
+
+# (1a) default effort (max) is clamped to 540s
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "PF_CODEX_PRINT_BUDGET=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'effort=max timeout=540s'; then
+  pass "default budget (max) clamped to 540s — fits under the 600s agent ceiling"
+else
+  fail "default budget not clamped (rc=$rc)" "stdout: $out"
+fi
+
+# (1b) PF_CODEX_TIMEOUT stays an absolute, unclamped override
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "PF_CODEX_PRINT_BUDGET=1" "PF_CODEX_TIMEOUT=1800" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'timeout=1800s'; then
+  pass "PF_CODEX_TIMEOUT=1800 overrides the clamp (human terminal, no ceiling)"
+else
+  fail "PF_CODEX_TIMEOUT no longer overrides the clamp (rc=$rc)" "stdout: $out"
+fi
+
+# (1c) budgets already under the ceiling are untouched
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "PF_CODEX_PRINT_BUDGET=1" -- --scope uncommitted --effort low 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'effort=low timeout=150s'; then
+  pass "effort low keeps its own 150s budget (clamp only lowers, never raises)"
+else
+  fail "sub-ceiling budget altered (rc=$rc)" "stdout: $out"
+fi
+rm -rf "$repo"
+
+# (2) internal watchdog FAIL: report overwritten with a FAILED summary + hint
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+outfile="$WORKROOT/i035-internal-fail.md"
+out="$( cd "$repo" && sut_run 30 "$MP_JQ" "FAKE_CODEX_MODE=hang" \
+        "PF_CODEX_TIMEOUT=2" "PF_CODEX_GRACE=1" \
+        -- --scope uncommitted --out "$outfile" 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] \
+   && printf '%s' "$out" | grep -q '^FAIL: TIMEOUT — Codex review did not produce output' \
+   && printf '%s' "$out" | grep -q "own watchdog" \
+   && head -1 "$outfile" 2>/dev/null | grep -q '^# Codex review FAILED' \
+   && ! grep -q 'PENDING' "$outfile"; then
+  pass "internal timeout -> FAIL + watchdog hint, report self-explains (not 0 bytes, not PENDING)"
+else
+  fail "internal timeout artifacts wrong (rc=$rc)" "stdout: $(printf '%s' "$out" | head -4 | tr '\n' '|') report: $(head -2 "$outfile" 2>/dev/null | tr '\n' '|')"
+fi
+rm -f "$outfile"; rm -rf "$repo"
+
+# (2b) T-127: the reason a run gave nothing is named on the verdict line —
+# quota (with the date the CLI quotes) and login — still `FAIL:`, never a verdict.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+outfile="$WORKROOT/t127-quota.md"
+out="$( cd "$repo" && sut_run 30 "$MP_JQ" "FAKE_CODEX_MODE=quota" -- --scope uncommitted --out "$outfile" 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] \
+   && printf '%s' "$out" | grep -q '^FAIL: QUOTA (until 2026-09-20) — Codex review did not produce output' \
+   && printf '%s' "$out" | grep -q '^STDERR (last lines):' \
+   && grep -q '^- state: QUOTA (until 2026-09-20)' "$outfile"; then
+  pass "T-127: stderr 'usage limit ... 2026-09-20' + exit 1 -> FAIL: QUOTA (until 2026-09-20), stderr tail kept, report names the state"
+else
+  fail "T-127 quota classification wrong (rc=$rc)" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|') report: $(head -6 "$outfile" 2>/dev/null | tr '\n' '|')"
+fi
+rm -f "$outfile"   # F-05: --out never overwrites
+out="$( cd "$repo" && sut_run 30 "$MP_JQ" "FAKE_CODEX_MODE=login" -- --scope uncommitted --out "$outfile" 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] \
+   && printf '%s' "$out" | grep -q '^FAIL: LOGIN — Codex review did not produce output'; then
+  pass "T-127: stderr 'not logged in' + exit 1 -> FAIL: LOGIN — ..."
+else
+  fail "T-127 login classification wrong (rc=$rc)" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|')"
+fi
+rm -f "$outfile"   # F-05: --out never overwrites
+out="$( cd "$repo" && sut_run 30 "$MP_JQ" "FAKE_CODEX_MODE=crash" -- --scope uncommitted --out "$outfile" 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] \
+   && printf '%s' "$out" | grep -q '^FAIL: Codex review did not produce output'; then
+  pass "T-127: an unrecognised stderr ('boom') keeps the plain FAIL line — no class invented"
+else
+  fail "T-127 unrecognised failure got a class (rc=$rc)" "stdout: $(printf '%s' "$out" | head -3 | tr '\n' '|')"
+fi
+rm -f "$outfile"; rm -rf "$repo"
+
+# (3) external kill (what an agent harness does at its ceiling): the reserved
+# report must already be a self-explaining placeholder, never zero bytes.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+outfile="$WORKROOT/i035-external-kill.md"
+marker="i035-extkill-$$"
+( cd "$repo" && env FAKE_CODEX_MODE=hang PF_CODEX_TIMEOUT=8 PF_CODEX_GRACE=1 \
+    PATH="$MP_JQ" "$BASH_BIN" "$SUT" --scope uncommitted --out "$outfile" --why "$marker" ) &
+sut_pid=$!
+# wait until the run is genuinely in flight: placeholder reserved AND codex
+# spawned (its argv carries $marker via --why), then kill the SUT dead — the
+# way a harness ceiling does, no TERM courtesy.
+waited=0
+while [ "$waited" -lt 50 ]; do
+  [ -s "$outfile" ] && PATH="$FULL_PATH" pgrep -f "$marker" >/dev/null 2>&1 && break
+  sleep 0.2; waited=$(( waited + 1 ))
+done
+kill -KILL "$sut_pid" 2>/dev/null
+{ wait "$sut_pid"; } 2>/dev/null
+if [ -s "$outfile" ] && grep -q 'PENDING' "$outfile" && grep -q 'killed from the OUTSIDE' "$outfile"; then
+  pass "external SIGKILL -> report is a self-explaining PENDING placeholder, not 0 bytes"
+else
+  fail "external kill left a lying artifact" "report($( wc -c < "$outfile" 2>/dev/null | tr -d ' ' ) bytes): $(head -3 "$outfile" 2>/dev/null | tr '\n' '|')"
+fi
+# cleanup: the orphaned fake codex sits in its own process group (set -m in
+# the SUT); the SUT's watchdog may already have reaped it (PF_CODEX_TIMEOUT=8),
+# kill the group ourselves to be sure.
+codex_pid="$(PATH="$FULL_PATH" pgrep -f "$marker" 2>/dev/null | head -1)"
+if [ -n "$codex_pid" ]; then
+  kill -KILL "-$codex_pid" 2>/dev/null || kill -KILL "$codex_pid" 2>/dev/null
+  track_leak_pid "$codex_pid"
+fi
+sleep 9   # let the orphaned watchdog (child of the killed SUT) run out and exit
+rm -f "$outfile"; rm -rf "$repo"
+
+# ===========================================================================
+group "T-070: --async detaches, --wait reads the marker, chunks fold into one verdict"
+# ===========================================================================
+# Root cause (retro 2026-09-03): the pre-pass went quiet for most of the
+# period. The I-035 clamp above keeps a synchronous run under the agent's 600s
+# Bash-tool ceiling, but a large diff simply does not fit in 540s, so the gate
+# collected FAIL after FAIL and walked on. --async moves the run out from under
+# that ceiling. Pinned here: (1) the flags are discoverable, (2) PENDING is
+# immediate and only ever promised when codex will really run, (3) the verdict
+# reaches the marker and --wait reproduces it byte-for-byte with the same exit
+# code, (4) a timeout is a loud FAIL, never a quiet success, (5) the detached
+# child outlives its launcher, (6) the clamp is lifted ONLY off the async path,
+# (7) a large diff is split and one bad group poisons the whole verdict.
+
+# (1) discoverability: --help must name both flags (they are useless unknown)
+out="$( sut_run 5 "$MP_JQ" -- --help 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q -- '--async' && printf '%s' "$out" | grep -q -- '--wait'; then
+  pass "--help lists --async and --wait"
+else
+  fail "--help does not document the async flags (rc=$rc)" "stdout: $out"
+fi
+
+# (2) mode conflicts are named, never silently ignored
+out="$( sut_run 5 "$MP_JQ" -- --async --wait /nonexistent 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: --async and --wait'; then
+  pass "--async together with --wait -> FAIL, exit 1"
+else
+  fail "--async --wait was not refused (rc=$rc)" "stdout: $out"
+fi
+out="$( sut_run 5 "$MP_JQ" -- --timeout 5 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: --timeout only applies'; then
+  pass "--timeout without --wait -> FAIL, exit 1 (not silently ignored)"
+else
+  fail "--timeout without --wait was accepted (rc=$rc)" "stdout: $out"
+fi
+out="$( sut_run 5 "$MP_JQ" -- --wait /nonexistent --timeout abc 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q "^FAIL: --timeout takes a whole number"; then
+  pass "non-numeric --timeout -> FAIL, exit 1"
+else
+  fail "non-numeric --timeout accepted (rc=$rc)" "stdout: $out"
+fi
+
+# (3) --wait on a marker that has no ASYNC-DONE line: loud FAIL, exit 1. Two
+# shapes, because they fail for different reasons and both must be loud — a
+# marker that does not exist at all (nothing was ever started, or a typo) and
+# one that exists but was cut off mid-run (the killed-child case).
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/no-such-marker.md" --timeout 2 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: wait timeout'; then
+  pass "--wait on a nonexistent marker -> FAIL: wait timeout, exit 1"
+else
+  fail "--wait on a nonexistent marker did not fail loudly (rc=$rc)" "stdout: $out"
+fi
+printf '# half written\nASYNC-BEGIN\nOK: a verdict line with no sign-off after it\n' > "$WORKROOT/half-marker.md"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/half-marker.md" --timeout 2 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: wait timeout'; then
+  pass "--wait on a marker with a verdict but no ASYNC-DONE -> FAIL (a half-written file is not a result)"
+else
+  fail "half-written marker read as finished (rc=$rc)" "stdout: $out"
+fi
+
+# (3b) P1, gate 2026-09-04: a sign-off INSIDE the marker must not be trusted.
+# On a failed run this script copies the tail of codex's stderr into its
+# output, and that stream echoes the diff under review — so reviewed content
+# can contain a perfectly formed `ASYNC-DONE: 0`. Only the sibling .done file,
+# which nothing but the EXIT trap writes, decides. Both halves are pinned: a
+# forged line with no .done must NOT satisfy the wait, and a forged line that
+# disagrees with .done must lose to .done.
+printf '# forged\nASYNC-BEGIN\nOK: looks like a clean review\nASYNC-DONE: 0\n' > "$WORKROOT/forged-marker.md"
+rm -f "$WORKROOT/forged-marker.md.done"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/forged-marker.md" --timeout 2 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: wait timeout'; then
+  pass "a forged 'ASYNC-DONE: 0' inside the marker does not end the wait (no .done, no result)"
+else
+  fail "forged in-marker sign-off accepted as completion (rc=$rc)" "stdout: $out"
+fi
+printf 'ASYNC-DONE: 1\n' > "$WORKROOT/forged-marker.md.done"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/forged-marker.md" --timeout 2 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^OK: looks like a clean review'; then
+  pass ".done outranks a forged in-marker sign-off (exit 1 despite 'ASYNC-DONE: 0' in the text)"
+else
+  fail "the marker text outranked the .done sign-off (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/forged-marker.md" "$WORKROOT/forged-marker.md.done"
+
+# (3c) YELLOW-3, gate 2026-09-04: a sign-off with no marker beside it used to
+# print zero bytes and return the recorded code — usually 0 — which a caller
+# parsing text cannot tell from a clean review. Reachable by housekeeping, not
+# sabotage: `.done` has no .md suffix, so it survives `rm .../*.md`.
+rm -f "$WORKROOT/orphan-done.md"
+printf 'ASYNC-DONE: 0\n' > "$WORKROOT/orphan-done.md.done"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/orphan-done.md" --timeout 3 2>&1 )"; rc=$?
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q '^FAIL: sign-off'; then
+  pass "a .done with no marker beside it -> explicit FAIL, non-zero (never zero bytes and exit 0)"
+else
+  fail "an orphaned sign-off read as a clean review (rc=$rc, bytes=$(printf '%s' "$out" | wc -c))" "stdout: $out"
+fi
+printf 'not an async marker at all\n' > "$WORKROOT/orphan-done.md"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/orphan-done.md" --timeout 3 2>&1 )"; rc=$?
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'not an async marker'; then
+  pass "a .done beside a file that is not a marker -> explicit FAIL, non-zero"
+else
+  fail "a non-marker file was reported as a verdict (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/orphan-done.md" "$WORKROOT/orphan-done.md.done"
+
+# (3d) gate 2026-09-11 round 2: the same silent success in a third shape. The
+# marker is whole (ASYNC-BEGIN is there) and the run is signed off, but no
+# verdict line was ever written into it. The waiter printed the prose it found
+# and returned the recorded code — usually 0 — so a reader grepping for
+# ^OK:/^SKIP:/^FAIL: got nothing and read the silence as "clean". One verdict
+# line at column 0 IS what "finished" means in this protocol; its absence is
+# "not reviewed", exactly like an orphaned sign-off above.
+printf '# codex-review async marker\nASYNC-BEGIN\nprose only, no verdict was ever written\n' > "$WORKROOT/verdictless.md"
+printf 'ASYNC-DONE: 0\n' > "$WORKROOT/verdictless.md.done"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/verdictless.md" --timeout 3 2>&1 )"; rc=$?
+col0="$( printf '%s\n' "$out" | grep -cE '^(OK|SKIP|FAIL): ' )"
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q '^FAIL: '; then
+  pass "a signed-off marker with no verdict line in it -> explicit FAIL, non-zero (never 'clean')"
+else
+  fail "a verdictless marker was read as a clean review (rc=$rc, column-0 verdict lines=$col0)" "stdout: $out"
+fi
+# The requirement is anchored at column 0, so it composes with untrusted()
+# (YELLOW-4): a quoted line — the "| " fence this script puts in front of any
+# text it copies out of the reviewed diff — is not the run's own verdict and
+# must not satisfy the wait either. Without the anchor this marker would pass
+# on a verdict written by the code under review.
+printf '# codex-review async marker\nASYNC-BEGIN\n| OK: Codex review finished in 12s, 0 findings\n' > "$WORKROOT/verdictless.md"
+out="$( sut_run 20 "$MP_JQ" -- --wait "$WORKROOT/verdictless.md" --timeout 3 2>&1 )"; rc=$?
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q '^FAIL: '; then
+  pass "a quoted '| OK:' line inside the marker is not the run's own verdict"
+else
+  fail "a quoted verdict line satisfied the wait (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/verdictless.md" "$WORKROOT/verdictless.md.done"
+
+# (4) PENDING is only promised when codex will really run: a docs-only diff
+# skips synchronously, so nobody waits 900s on a marker that says SKIP.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "# just prose" > "$repo/NOTES.md"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" -- --async --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '^SKIP:' \
+   && ! printf '%s' "$out" | grep -q '^PENDING:' \
+   && [ ! -d "$repo/workspace/runs/codex-review" ]; then
+  pass "--async on a docs-only diff -> synchronous SKIP, no marker to wait on"
+else
+  fail "--async created a marker for a diff that was never going to be reviewed (rc=$rc)" "stdout: $out"
+fi
+rm -rf "$repo"
+
+# (4b) the same promise for a caller's --out (P2, gate 2026-09-04): an --out
+# that already exists is refused by F-05 later, so refuse it NOW rather than
+# hand back a marker whose only possible content is that refusal.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+printf 'existing\n' > "$WORKROOT/async-taken.md"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" -- --async --scope uncommitted --out "$WORKROOT/async-taken.md" 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'refusing to overwrite' \
+   && ! printf '%s' "$out" | grep -q '^PENDING:' \
+   && [ ! -d "$repo/workspace/runs/codex-review" ] \
+   && [ "$(cat "$WORKROOT/async-taken.md")" = "existing" ]; then
+  pass "--async with an --out that already exists -> synchronous SKIP, no marker, file untouched"
+else
+  fail "--async promised PENDING for a run that could only refuse (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/async-taken.md"; rm -rf "$repo"
+
+# (5) the happy path, end to end: PENDING now, verdict later, --wait returns
+# exactly what a synchronous run prints and exactly the code it would exit with.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+t0="$(date +%s)"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=success" -- --async --scope uncommitted 2>&1 )"; rc=$?
+t1="$(date +%s)"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+if [ "$rc" = 0 ] && [ -n "$marker" ] && [ -f "$marker" ] && [ "$(( t1 - t0 ))" -lt 5 ]; then
+  pass "--async returns PENDING with an existing marker in under 5s ($(( t1 - t0 ))s)"
+else
+  fail "--async did not return a marker promptly (rc=$rc, $(( t1 - t0 ))s)" "stdout: $out"
+fi
+waited="$( sut_run 40 "$MP_JQ" -- --wait "$marker" --timeout 25 2>&1 )"; wrc=$?
+sync_out="$( cd "$repo" && sut_run 15 "$MP_JQ" "FAKE_CODEX_MODE=success" -- --scope uncommitted 2>&1 )"; src=$?
+# Normalise the two things that legitimately differ between any two runs: the
+# report's timestamped filename and the elapsed seconds.
+norm_verdict() { sed -E 's#[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}#<STAMP>#g; s#in [0-9]+s#in <N>s#g'; }
+if [ "$wrc" = 0 ] && [ "$src" = 0 ] \
+   && [ "$( printf '%s\n' "$waited" | norm_verdict )" = "$( printf '%s\n' "$sync_out" | norm_verdict )" ]; then
+  pass "--wait prints the same digest and the same exit code as the synchronous run"
+else
+  fail "async verdict differs from the synchronous one (wait rc=$wrc, sync rc=$src)" "wait: $waited || sync: $sync_out"
+fi
+if grep -q '^ASYNC-DONE: 0$' "$marker" && [ "$(grep -cE '^(OK|SKIP|FAIL): ' "$marker")" = 1 ]; then
+  pass "marker carries ASYNC-DONE: 0 and exactly one column-0 verdict line"
+else
+  fail "marker sign-off or verdict shape is wrong" "$(cat "$marker")"
+fi
+rm -rf "$repo"
+
+# (6) a failing review propagates through the marker: ASYNC-DONE: 1 and --wait
+# exits 1. "Not reviewed" must survive the trip through a file.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=empty" -- --async --scope uncommitted 2>&1 )"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+waited="$( sut_run 40 "$MP_JQ" -- --wait "$marker" --timeout 25 2>&1 )"; wrc=$?
+if [ "$wrc" = 1 ] && printf '%s' "$waited" | grep -q '^FAIL:' && grep -q '^ASYNC-DONE: 1$' "$marker"; then
+  pass "a failed review reaches the marker as ASYNC-DONE: 1 and --wait exits 1"
+else
+  fail "failure did not survive the marker round-trip (rc=$wrc)" "wait: $waited"
+fi
+rm -rf "$repo"
+
+# (7) the child is genuinely detached: its launcher returned seconds ago, yet
+# the run continues and writes its own watchdog verdict afterwards. This is the
+# whole premise of --async; without it the feature is decoration.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+t0="$(date +%s)"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "FAKE_CODEX_MODE=hang" "PF_CODEX_TIMEOUT=6" "PF_CODEX_GRACE=1" -- --async --scope uncommitted 2>&1 )"
+t1="$(date +%s)"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+waited="$( sut_run 60 "$MP_JQ" -- --wait "$marker" --timeout 40 2>&1 )"; wrc=$?
+t2="$(date +%s)"
+if [ "$(( t1 - t0 ))" -lt 5 ] && [ "$wrc" = 1 ] \
+   && printf '%s' "$waited" | grep -q "^FAIL: TIMEOUT — Codex review did not produce output" \
+   && [ "$(( t2 - t0 ))" -ge 6 ]; then
+  pass "detached child outlives its launcher ($(( t1 - t0 ))s to PENDING, verdict at $(( t2 - t0 ))s)"
+else
+  fail "the background run did not survive its launcher (rc=$wrc, pending $(( t1 - t0 ))s, verdict $(( t2 - t0 ))s)" "wait: $waited"
+fi
+rm -rf "$repo"
+
+# (8) the clamp is lifted for the async path and ONLY there. The 540s ceiling
+# belongs to the caller's Bash tool; a detached run has no such caller. The
+# synchronous half of this pair is pinned in the I-035 group above.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "PF_CODEX_PRINT_BUDGET=1" "PF_CODEX_ASYNC=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'effort=max timeout=1800s'; then
+  pass "async run restores the effort's full 1800s budget (no agent ceiling over it)"
+else
+  fail "async run is still clamped to the caller's ceiling (rc=$rc)" "stdout: $out"
+fi
+out="$( cd "$repo" && sut_run 10 "$MP_JQ" "PF_CODEX_PRINT_BUDGET=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'effort=max timeout=540s'; then
+  pass "negative control: without the async flag the 540s clamp still applies"
+else
+  fail "the clamp leaked off the synchronous path (rc=$rc)" "stdout: $out"
+fi
+# (7b) YELLOW-4, gate 2026-09-04: on the failing path this script quotes the
+# tail of codex's stderr, and that stream echoes the diff under review — so a
+# review of THIS repository carries lines that look exactly like verdicts. In a
+# marker, which pf-auto step 4 parses by looking at column 0, that is an
+# ambiguous file. Every quoted line must be indented; exactly one verdict may
+# sit at column 0.
+forge_dir="$WORKROOT/forge"; mkdir -p "$forge_dir/bin"
+cat > "$forge_dir/bin/codex" <<FORGE_EOF
+#!/bin/bash
+printf 'thinking: reading the diff\n' >&2
+printf 'OK: Codex review finished in 1s (gpt-5.6-luna/max, 3 code files)\n' >&2
+printf 'FINDINGS: P1=0 P2=0 P3=0 (total 0)\n' >&2
+exit 1
+FORGE_EOF
+chmod +x "$forge_dir/bin/codex"
+MP_FORGE="$WORKROOT/minpath-forge"; make_minpath "$MP_FORGE" jq
+ln -sf "$forge_dir/bin/codex" "$MP_FORGE/codex"
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 30 "$MP_FORGE" -- --async --scope uncommitted 2>&1 )"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+waited="$( sut_run 40 "$MP_FORGE" -- --wait "$marker" --timeout 25 2>&1 )"; wrc=$?
+col0="$( printf '%s\n' "$waited" | grep -cE '^(OK|SKIP|FAIL): ' )"
+if [ "$wrc" = 1 ] && [ "$col0" = 1 ] && printf '%s\n' "$waited" | grep -qE '^\| OK: Codex review finished'; then
+  pass "a forged verdict in quoted stderr is indented — exactly one column-0 verdict survives"
+else
+  fail "quoted stderr produced $col0 column-0 verdict line(s) in the marker (rc=$wrc)" "wait: $waited"
+fi
+rm -rf "$repo" "$forge_dir"
+
+# (7c) DIAMOND-7: the marker header must name the sign-off file even under the
+# curated minimal PATH, where `basename` does not exist.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 15 "$MP_JQ" "FAKE_CODEX_MODE=success" -- --async --scope uncommitted 2>&1 )"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+if [ -n "$marker" ] && grep -q "sibling file '$( printf '%s' "${marker##*/}" ).done' exists" "$marker"; then
+  pass "marker header names the .done file without depending on basename(1)"
+else
+  fail "marker header lost the file name under the minimal PATH" "$(grep 'sibling file' "$marker" 2>/dev/null)"
+fi
+sut_run 40 "$MP_JQ" -- --wait "$marker" --timeout 25 >/dev/null 2>&1
+rm -rf "$repo"
+
+# (7d) YELLOW-5: --base is advertised as an immutable scope, so BOTH ends must
+# be frozen at launch. The child must receive shas, never names, and must not
+# resolve HEAD for itself minutes later. Proof is in the argv that reaches
+# codex: no literal 'HEAD' in the diff command.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+( cd "$repo" && PATH="$FULL_PATH" git commit -q --allow-empty -m second \
+  && echo "x=1" > change.sh && PATH="$FULL_PATH" git add -A && PATH="$FULL_PATH" git commit -qm third ) >/dev/null 2>&1
+base_argv="$WORKROOT/base-async-argv.log"; : > "$base_argv"
+out="$( cd "$repo" && sut_run 30 "$MP_JQ" "FAKE_CODEX_MODE=clean" "FAKE_CODEX_ARGV_LOG=$base_argv" -- --async --base HEAD~2 2>&1 )"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+sut_run 40 "$MP_JQ" -- --wait "$marker" --timeout 25 >/dev/null 2>&1
+diffcmd="$(grep -o 'git diff [0-9a-f]*\.\.\.[^ ]*' "$base_argv" | head -1)"
+if [ -n "$diffcmd" ] && ! printf '%s' "$diffcmd" | grep -q 'HEAD' \
+   && printf '%s' "$diffcmd" | grep -qE '^git diff [0-9a-f]{40}\.\.\.[0-9a-f]{40}$'; then
+  pass "--async --base freezes both ends to shas at launch ($diffcmd)"
+else
+  fail "an async --base range still carries a name codex resolves later" "diff cmd: ${diffcmd:-<none>}"
+fi
+# negative control: the synchronous path still sends the literal HEAD it always did
+: > "$base_argv"
+out="$( cd "$repo" && sut_run 20 "$MP_JQ" "FAKE_CODEX_MODE=clean" "FAKE_CODEX_ARGV_LOG=$base_argv" -- --base HEAD~2 2>&1 )"
+if grep -q 'git diff [0-9a-f]*\.\.\.HEAD' "$base_argv"; then
+  pass "negative control: the synchronous --base is unchanged (literal HEAD, as before T-070)"
+else
+  fail "the sync path's diff command changed" "$(grep -o 'git diff [^(]*' "$base_argv" | head -1)"
+fi
+rm -rf "$repo"
+
+# (7f) The path a neighbouring ticket crashed on: --async with an explicit
+# --effort. Nothing about the flag is special, which is exactly why nothing
+# covered it, and a crash on it reached another packet before any test did.
+repo="$(new_repo)"
+consent_file "$repo" '{"enabled": true}'
+echo "x=1" > "$repo/change.sh"
+out="$( cd "$repo" && sut_run 15 "$MP_JQ" "FAKE_CODEX_MODE=success" -- --async --effort high --scope uncommitted 2>&1 )"
+marker="$( printf '%s\n' "$out" | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+waited="$( sut_run 40 "$MP_JQ" -- --wait "$marker" --timeout 25 2>&1 )"; wrc=$?
+if [ "$wrc" = 0 ] && printf '%s' "$waited" | grep -q '^OK: Codex review finished in .*luna/high' \
+   && ! printf '%s' "$waited" | grep -q 'command not found'; then
+  pass "--async --effort high completes and signs off (the path a neighbouring ticket crashed on)"
+else
+  fail "--async --effort high did not produce a clean verdict (rc=$wrc)" "wait: $waited"
+fi
+rm -rf "$repo"
+
+# (7g) Root cause of that crash, and the fix. bash reads a script by byte
+# offset for as long as it runs, so editing this file during a half-hour
+# detached review makes the child resume inside different bytes and execute a
+# fragment — observed as `line 725: already: command not found`, the word from
+# `--out $OUT already exists`. Reviews of THIS skill are both the longest and
+# the ones most likely to run while somebody edits it, so the launcher executes
+# a private snapshot. Here the canon is overwritten mid-run on purpose.
+slow_dir="$WORKROOT/slowcodex"; mkdir -p "$slow_dir"
+cat > "$slow_dir/codex" <<SLOW_EOF
+#!/bin/bash
+sleep 5
+export FAKE_CODEX_MODE=success
+exec "$FAKE_CODEX" "\$@"
+SLOW_EOF
+chmod +x "$slow_dir/codex"
+MP_SLOW="$WORKROOT/minpath-slow"; make_minpath "$MP_SLOW" jq
+ln -sf "$slow_dir/codex" "$MP_SLOW/codex"
+
+# run_edited_canon <copy-path> -> echoes "rc|first line of the verdict"
+run_edited_canon() {
+  local canon="$1" r m w rc
+  r="$(new_repo)"
+  consent_file "$r" '{"enabled": true}'
+  echo "x=1" > "$r/change.sh"
+  m="$( cd "$r" && PF_CODEX_REVIEW_SCRIPT="$canon" SUT="$canon"         run_with_timeout 15 env PATH="$MP_SLOW" "$BASH_BIN" "$canon" --async --scope uncommitted 2>&1         | grep '^PENDING: ' | sed 's/^PENDING: //' )"
+  # Overwrite the canon while the detached child is still reading it, changing
+  # every byte offset after the header — an ordinary edit, not sabotage.
+  printf '#!/usr/bin/env bash
+%s
+exit 0
+'     "$(printf '# a header line inserted by an editor mid-run
+%.0s' 1 2 3 4 5 6 7 8 9 10)" > "$canon"
+  w="$( run_with_timeout 60 env PATH="$MP_SLOW" "$BASH_BIN" "$SUT" --wait "$m" --timeout 40 2>&1 )"; rc=$?
+  rm -rf "$r"
+  printf '%s|%s' "$rc" "$( printf '%s\n' "$w" | head -1 )"
+}
+
+canon_ok="$WORKROOT/canon-snapshotting.sh"; cp "$SUT" "$canon_ok"
+res="$(run_edited_canon "$canon_ok")"
+if [ "${res%%|*}" = 0 ] && printf '%s' "${res#*|}" | grep -q '^OK: Codex review finished'; then
+  pass "the canon may be edited mid-run: the detached child runs a private snapshot and still signs off"
+else
+  fail "editing the canon during a detached run broke it" "got: $res"
+fi
+
+# Mutation control with an anchor: take the snapshot away and the same scenario
+# must go red, or the test above proves nothing.
+canon_bad="$WORKROOT/canon-no-snapshot.sh"
+if PATH="$FULL_PATH" python3 - "$SUT" "$canon_bad" <<'MUT_EOF'
+import io, sys
+src, dst = sys.argv[1], sys.argv[2]
+s = io.open(src, encoding="utf-8").read()
+old = '_ "${BASH:-bash}" "$SELF_SNAP" ${FWD[@]+"${FWD[@]}"}'
+new = '_ "${BASH:-bash}" "$SELF" ${FWD[@]+"${FWD[@]}"}'
+assert s.count(old) == 1, "anchor not unique: %d" % s.count(old)
+io.open(dst, "w", encoding="utf-8").write(s.replace(old, new, 1))
+MUT_EOF
+then
+  res="$(run_edited_canon "$canon_bad")"
+  if [ "${res%%|*}" != 0 ] || ! printf '%s' "${res#*|}" | grep -q '^OK:'; then
+    pass "mutation control: without the private snapshot the same edit breaks the run (harness is not vacuous)"
+  else
+    fail "the scenario passes even without the fix — it proves nothing" "got: $res"
+  fi
+else
+  fail "could not build the mutation control (anchor missing in the SUT)" "the launcher no longer execs \$SELF_SNAP"
+fi
+rm -f "$canon_ok" "$canon_bad"; rm -rf "$slow_dir"
+
+# (7e) RED-2: the two files a reader follows must not contradict each other.
+# SKILL.md is read every session, references/ only by link — so the trap
+# described in one must not be the instruction given by the other.
+skill_md="$TESTS_DIR/../../SKILL.md"
+ref_md="$TESTS_DIR/../../references/codex-review.md"
+if [ -f "$skill_md" ] && [ -f "$ref_md" ] \
+   && ! grep -q -- '--async --scope uncommitted' "$skill_md" \
+   && grep -q -- '--async --commit' "$skill_md" \
+   && grep -q 'synchronous' "$skill_md" \
+   && grep -q -- '--async --commit' "$ref_md"; then
+  pass "SKILL.md step 5a sends an async run at an immutable scope, agreeing with references/codex-review.md"
+else
+  fail "SKILL.md still points an async run at the moving target its own reference warns about" \
+       "skill: $(grep -o -- '--async[^`]*' "$skill_md" | head -2 | tr '\n' ' ')"
+fi
+
+# (8b) a stray chunk list must not narrow an ordinary review (P2, gate
+# 2026-09-04). Outside a detached run the list is ignored, so the review still
+# covers the whole diff and no pathspec reaches the prompt.
+# Its own repo on purpose: cases inserted above this one reassigned and then
+# deleted a shared `repo`, and this scenario failed against a directory that no
+# longer existed — a harness defect that reads exactly like a product one.
+argv_stray="$WORKROOT/stray-chunk-argv.log"; : > "$argv_stray"
+printf 'change.sh\n' > "$WORKROOT/stray-chunk-list.txt"
+stray_repo="$(new_repo)"
+consent_file "$stray_repo" '{"enabled": true}'
+echo "x=1" > "$stray_repo/change.sh"
+echo "y=2" > "$stray_repo/other.sh"
+out="$( cd "$stray_repo" && sut_run 15 "$MP_JQ" "FAKE_CODEX_MODE=clean" "FAKE_CODEX_ARGV_LOG=$argv_stray" \
+        "PF_CODEX_CHUNK_FILE=$WORKROOT/stray-chunk-list.txt" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '2 code files' \
+   && ! grep -q "git diff HEAD --" "$argv_stray"; then
+  pass "PF_CODEX_CHUNK_FILE alone cannot narrow a review — it needs a detached run"
+else
+  fail "a stray chunk list silently narrowed an ordinary review (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/stray-chunk-list.txt"
+rm -rf "$stray_repo"
+
+# (9) chunking: the split plan and its negative control. The threshold lives in
+# one constant; these two cases pin both sides of it.
+big_repo="$(new_repo)"
+consent_file "$big_repo" '{"enabled": true}'
+i=1; while [ "$i" -le 60 ]; do echo "v=$i" > "$big_repo/f$i.sh"; i=$(( i + 1 )); done
+out="$( cd "$big_repo" && sut_run 15 "$MP_JQ" "PF_CODEX_ASYNC=1" "PF_CODEX_PRINT_CHUNKS=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '^CHUNKS: 3 group(s) of at most 25 file(s) for 60 code file(s)' \
+   && printf '%s' "$out" | grep -q '^CHUNK 1/3: 25 file(s)' \
+   && printf '%s' "$out" | grep -q '^CHUNK 3/3: 10 file(s)'; then
+  pass "60 code files split into 3 groups of 25/25/10"
+else
+  fail "chunk plan wrong for 60 files (rc=$rc)" "stdout: $out"
+fi
+small_repo="$(new_repo)"
+consent_file "$small_repo" '{"enabled": true}'
+i=1; while [ "$i" -le 20 ]; do echo "v=$i" > "$small_repo/f$i.sh"; i=$(( i + 1 )); done
+out="$( cd "$small_repo" && sut_run 15 "$MP_JQ" "PF_CODEX_ASYNC=1" "PF_CODEX_PRINT_CHUNKS=1" "PF_CODEX_PRINT_BUDGET=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && ! printf '%s' "$out" | grep -q '^CHUNKS:' && printf '%s' "$out" | grep -q '^BUDGET:'; then
+  pass "negative control: 20 files stay one pass (under the threshold, no split)"
+else
+  fail "a diff under the threshold was split anyway (rc=$rc)" "stdout: $out"
+fi
+rm -rf "$small_repo"
+
+# (10) a chunked run really restricts each pass: the pathspec reaches the diff
+# command in the prompt, the groups partition the diff exactly (no file seen
+# twice, none dropped), and the findings are summed into one verdict.
+argv_log="$WORKROOT/async-chunk-argv.log"; : > "$argv_log"
+out="$( cd "$big_repo" && sut_run 60 "$MP_JQ" "PF_CODEX_ASYNC=1" "FAKE_CODEX_MODE=findings-multi" "FAKE_CODEX_ARGV_LOG=$argv_log" -- --scope uncommitted 2>&1 )"; rc=$?
+calls="$(grep -c '^exec --skip-git-repo-check' "$argv_log" || true)"
+partition="$(grep -o "git diff HEAD -- [^(]*" "$argv_log" | tr ' ' '\n' | grep "^'f" | tr -d "'" | sort -u | grep -c .)"
+if [ "$rc" = 0 ] && [ "$calls" = 3 ] && [ "$partition" = 60 ] \
+   && printf '%s' "$out" | grep -q '^FINDINGS: P1=3 P2=3 P3=3 (total 9)' \
+   && printf '%s' "$out" | grep -q '^OK: Codex review finished in .* (3 groups, 60 code files, every group reviewed)'; then
+  pass "3 passes, pathspecs cover all 60 files exactly once, findings summed (P1=3 P2=3 P3=3)"
+else
+  fail "chunked run did not partition or aggregate correctly (rc=$rc, calls=$calls, files=$partition)" "stdout: $out"
+fi
+# exactly one column-0 verdict: a reader grepping '^FAIL:' must never get an
+# ambiguous answer from per-group lines.
+if [ "$( printf '%s\n' "$out" | grep -cE '^(OK|SKIP|FAIL): ' )" = 1 ]; then
+  pass "per-group verdicts are prefixed — only the aggregate sits at column 0"
+else
+  fail "more than one column-0 verdict line in a chunked run" "stdout: $out"
+fi
+
+# (11) a caller's --out is never handed to two groups (F-05 would refuse the
+# second and the review would silently shrink to one group).
+rm -f "$WORKROOT/chunked-report"*.md
+out="$( cd "$big_repo" && sut_run 60 "$MP_JQ" "PF_CODEX_ASYNC=1" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out "$WORKROOT/chunked-report.md" 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && [ -s "$WORKROOT/chunked-report-chunk-1.md" ] \
+   && [ -s "$WORKROOT/chunked-report-chunk-2.md" ] && [ -s "$WORKROOT/chunked-report-chunk-3.md" ] \
+   && ! printf '%s' "$out" | grep -q 'refusing to overwrite'; then
+  pass "--out with chunking derives one report per group, no F-05 collision"
+else
+  fail "--out collided across groups (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/chunked-report"*.md
+
+# (12) NEGATIVE CONTROL for the aggregate: one bad group poisons the verdict.
+# Without this, "2 of 3 reviewed" could read as OK — the exact silent-success
+# shape §11 forbids. The double answers on its call ordinal: first call is a
+# provider dump (no marker -> FAIL), the rest are honest clean reviews.
+stateful_dir="$WORKROOT/stateful"; mkdir -p "$stateful_dir/bin"
+# No `env` here: it is deliberately absent from the curated PATH (BASE_TOOLS),
+# and a double that needs a tool the SUT does not need would test the harness,
+# not the product — as this case proved on its first run.
+cat > "$stateful_dir/bin/codex" <<STATEFUL_EOF
+#!/bin/bash
+N=\$(cat "$stateful_dir/count" 2>/dev/null || echo 0); N=\$(( N + 1 )); echo "\$N" > "$stateful_dir/count"
+if [ "\$N" = 1 ]; then export FAKE_CODEX_MODE=html-error; else export FAKE_CODEX_MODE=clean; fi
+exec "$FAKE_CODEX" "\$@"
+STATEFUL_EOF
+chmod +x "$stateful_dir/bin/codex"
+MP_STATEFUL="$WORKROOT/minpath-stateful"; make_minpath "$MP_STATEFUL" jq
+ln -sf "$stateful_dir/bin/codex" "$MP_STATEFUL/codex"
+out="$( cd "$big_repo" && sut_run 60 "$MP_STATEFUL" "PF_CODEX_ASYNC=1" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: not reviewed — 1 of 3 group(s) produced no verdict' \
+   && printf '%s' "$out" | grep -q '^CHUNKS: 3 group(s) .* ok=2 skipped=0 failed=1'; then
+  pass "one failed group makes the whole verdict FAIL, exit 1 (2 of 3 is not clean)"
+else
+  fail "a partial review was reported as success (rc=$rc)" "stdout: $out"
+fi
+
+# (13) RED-1, gate 2026-09-04: a group that SKIPS is a hole in the coverage,
+# not a neutral outcome. This is the shape the gate actually caught — 1 OK and
+# 2 SKIP out of 3 reported OK: and exit 0, i.e. 20 files of 60 reviewed and
+# called clean. Reached the way the gate reached it, with no sabotage at all:
+# the derived per-group --out paths already exist, so groups 2 and 3 refuse
+# them under F-05 and skip.
+rm -f "$WORKROOT/skipagg"*.md
+: > "$WORKROOT/skipagg-chunk-2.md"; : > "$WORKROOT/skipagg-chunk-3.md"
+out="$( cd "$big_repo" && sut_run 60 "$MP_JQ" "PF_CODEX_ASYNC=1" "FAKE_CODEX_MODE=clean" -- --scope uncommitted --out "$WORKROOT/skipagg.md" 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] \
+   && printf '%s' "$out" | grep -q '^CHUNKS: 3 group(s) .* ok=1 skipped=2 failed=0' \
+   && printf '%s' "$out" | grep -q '^FAIL: not reviewed — 2 of 3 group(s) produced no verdict' \
+   && ! printf '%s' "$out" | grep -q '^OK:'; then
+  pass "1 OK + 2 SKIP of 3 -> FAIL, exit 1 (a skip is 'no review happened here')"
+else
+  fail "skipped groups were counted as harmless — 20 of 60 files reviewed, reported clean (rc=$rc)" "stdout: $out"
+fi
+rm -f "$WORKROOT/skipagg"*.md
+
+# (14) YELLOW-6: the whole-run budget. Set to zero seconds, no group may start,
+# and the run must say so rather than report the groups that fit.
+out="$( cd "$big_repo" && sut_run 60 "$MP_JQ" "PF_CODEX_ASYNC=1" "FAKE_CODEX_MODE=clean" "PF_CODEX_TOTAL_BUDGET=0" -- --scope uncommitted 2>&1 )"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q '^FAIL: budget exhausted, 0 of 3 groups reviewed' \
+   && printf '%s' "$out" | grep -q '^NOTE: this run is split into 3 group(s)'; then
+  pass "whole-run budget: exhausted -> FAIL naming how many groups ran, plus an up-front NOTE with the forecast"
+else
+  fail "the run budget did not stop the run honestly (rc=$rc)" "stdout: $out"
+fi
+rm -rf "$big_repo" "$stateful_dir"
+
 finish

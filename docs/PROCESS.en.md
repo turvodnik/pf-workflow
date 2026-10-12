@@ -77,4 +77,4 @@ Engages **only** on an explicit command `/pf-auto` or phrase ("autopilot", "do i
 
 ## 9. Session continuity — the pf-handoff companion
 
-Long sessions hit the context window. That problem is solved by a separate tool, [pf-handoff](https://github.com/turvodnik/pf-handoff): a live task-state cheat-sheet, a window-usage gauge with 60/80/90 % thresholds, surviving history compaction, and pickup in a new chat (`/pf-resume`). pf-do and pf-replan are designed to pair with it, but pf-workflow works without it too.
+Long sessions hit the context window. That problem is solved by a separate tool, [pf-handoff](https://github.com/turvodnik/pf-handoff): a live task-state cheat-sheet, a window-usage gauge with 40/60/75 % thresholds, surviving history compaction, and pickup in a new chat (`/pf-resume`). pf-do and pf-replan are designed to pair with it, but pf-workflow works without it too.

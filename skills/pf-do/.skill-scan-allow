@@ -1,0 +1,16 @@
+# .skill-scan-allow — known false positives of pf-guard skill-scan in pf-do (own canon, not a foreign skill).
+# 7 fields: sha256[:16] of the stripped line | RULE | path glob (anchored, relative to this file) | recognized_by | date | review until | reason
+# Applied only with `skill-scan.sh --trust-allow` (this file lies inside the scanned tree) or when the parent dir is scanned from outside.
+9e7098068506af49 | S04 | references/second-opinion.md | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: second-opinion.md:214 lists the bypass flags no command may carry (prose, not a call)
+9e7098068506af49 | S05 | references/second-opinion.md | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: the same line second-opinion.md:214 names bypassPermissions as forbidden (prose, not a setting)
+5125671d6215a37b | S04 | references/second-opinion.md | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: second-opinion.md:215 continues the list of forbidden flags (prose, not a call)
+f2567fa21e78eb4e | S04 | scripts/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: council.sh:185, the header's ban block (comment line, not a call)
+c44c9704d8523d10 | S05 | scripts/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: council.sh:186, the same ban block (comment line, not a setting)
+14f0d69f47c20a12 | S04 | scripts/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: council.sh:187, the same ban block (comment line, not a call)
+70209cea018fd249 | S04 | scripts/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | comment names a forbidden flag: council.sh:497 explains why a model name may not start with '-' (comment line, not a call)
+522c68171872eb10 | S06 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test fixture: tests/council.sh:277 and :560 write a marker AGENTS.md into the suite's own temp repo, not the project rules
+fbbf13a152633f9a | S04 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test passes the flag as a model name and checks the refusal: tests/council.sh:691 expects FAIL 'model names are …', no CLI started
+5bc4576ce8223f39 | S04 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test passes the flag as a model name and checks the refusal: tests/council.sh:692, label and check of the same case
+b62da53c93e42bbe | S04 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test passes the flag as a model name and checks the refusal: tests/council.sh:693, the same case in --dry-run (no DRY-RUN line carries the flag)
+c95b203850db6cb1 | S05 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test checks the flag is only in comments: tests/council.sh:764 greps council.sh for forbidden words outside comment lines
+ec21e705535ae536 | S05 | scripts/tests/council.sh | claude (T-187) | 2026-10-11 | 2027-04-11 | test checks the flag is only in comments: tests/council.sh:766 counts the comment lines with forbidden words

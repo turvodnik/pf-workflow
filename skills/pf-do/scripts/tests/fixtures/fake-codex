@@ -371,6 +371,13 @@ case "${FAKE_CODEX_MODE:-success}" in
   crash)
     printf 'boom\n' >&2
     exit 1 ;;
+  quota)
+    # T-127: the real CLI's refusal, on stderr, exit 1 (date phrasing as seen live).
+    printf "You've hit your usage limit. Resets 2026-09-20\n" >&2
+    exit 1 ;;
+  login)
+    printf 'Error: not logged in — run codex login first.\n' >&2
+    exit 1 ;;
   hang)
     # Never exits by itself. No trap: a group-wide TERM kills it like any
     # ordinary process (this is the "leader dies normally" half of F-11).

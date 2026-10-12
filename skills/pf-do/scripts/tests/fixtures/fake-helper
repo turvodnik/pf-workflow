@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# fake-helper — stand-in for agy / grok / codex / claude in tests/council.sh.
+# Symlinked under each of those names; behaviour comes from $STUB_CTL/<name>.mode
+# (ok | quota | quota429 | empty | login | hang | crash | commit | dirty |
+# outside | quota-after-commit | badmodel | gitconfig | hook | secret | ledger |
+# fsmon | pointer | ignledger | commondir), default ok. T-170: `--version` and
+# `codex login status` (the free probes of `council.sh check`) answer from
+# $STUB_CTL/<name>.check (vfail | loggedout; default fine), are logged to
+# $STUB_CTL/probes and never count as a model call. Records argv, cwd, the prompt it received and the call
+# order, and refuses any bypass flag outright. `workspace-write` is not a
+# bypass flag: it is codex's edit sandbox, legitimate in delegate — the suite
+# checks WHERE it appears, not the stub.
+# delegate behaviours (T-113): commit — write a file in cwd and commit it;
+# dirty — write a file in cwd, no commit; outside — commit in cwd AND write
+# the file named in $STUB_CTL/outside.path (a path in the main tree).
+# T-171 (run --role executor, the launcher commits): gitconfig — dirty plus a
+# key in the repository's .git/config; hook — dirty plus an executable
+# pre-commit hook in the common hooks directory. Fix round 2: secret — dirty
+# plus leaked.py holding a synthetic GitHub-token-shaped string; ledger — dirty
+# plus .agents/security/false-positives.yaml; fsmon — dirty plus
+# core.fsmonitor = a program that appends to $STUB_CTL/fsmon-ran; pointer —
+# dirty plus the worktree's .git file pointed at ./.evil. Fix round 3:
+# ignledger — secret plus the ledger path in .gitignore and an ignored ledger
+# that suppresses everything; commondir — dirty plus a copy of the common git
+# dir in ./.fakegit with core.fsmonitor = the marker program, and the
+# worktree's commondir file pointed at it. T-191: secret-answer — dirty, and
+# the FINAL MESSAGE carries a synthetic GitHub-token-shaped string (built at
+# run time; secret-answer-ro — the same message, no file written; err-secret
+# — the token is the LAST line of stderr and the CLI exits 2); exclude — dirty plus a line appended to the common
+# info/exclude. Every call records PF_COUNCIL_RUN (Ж-8) in <name>.pfcr.
+name="$(basename "$0")"; ctl="${STUB_CTL:?}"
+mode="$(cat "$ctl/$name.mode" 2>/dev/null || echo ok)"
+chk="$(cat "$ctl/$name.check" 2>/dev/null)"
+case "${1:-} ${2:-}" in
+  "--version "*) echo "$name --version" >> "$ctl/probes"
+                 [ "$chk" = vfail ] && { echo "$name: broken install" >&2; exit 3; }
+                 echo "$name 9.9.9 (fake)"; exit 0 ;;
+  "login status") echo "$name login status" >> "$ctl/probes"
+                 [ "$chk" = loggedout ] && { echo "Not logged in"; exit 1; }
+                 echo "Logged in using ChatGPT"; exit 0 ;;
+esac
+printf '%s\n' "$@" > "$ctl/$name.args"
+# claude must be started with CLAUDECODE unset (a nested-session refusal otherwise).
+[ -n "${CLAUDECODE:-}" ] && echo "$CLAUDECODE" > "$ctl/$name.claudecode"
+# Like the real CLIs: grok's --cwd and codex's -C set the working directory.
+prev=""; for a in "$@"; do case "$prev" in --cwd|-C) cd "$a" || exit 4 ;; esac; prev="$a"; done
+pwd > "$ctl/$name.cwd"
+echo "$name" >> "$ctl/calls"
+printf '%s\n' "${PF_COUNCIL_RUN:-<unset>}" >> "$ctl/$name.pfcr"
+# Only the suite's own canary variable is ever written down — never the environment.
+[ -n "${COUNCIL_TEST_CANARY:-}" ] && printf '%s' "$COUNCIL_TEST_CANARY" > "$ctl/$name.env"
+for a in "$@"; do
+  case "$a" in
+    *dangerously-skip-permissions*|*always-approve*|*bypassPermissions*|*danger-full-access*|*dangerously-bypass*)
+      echo "$a" >> "$ctl/$name.forbidden"; echo "forbidden flag: $a" >&2; exit 99 ;;
+  esac
+done
+# The prompt, the way each real CLI takes it.
+last_file=""
+case "$name" in
+  agy)   for a in "$@"; do case "$a" in --print=*) printf '%s' "${a#--print=}" > "$ctl/$name.prompt" ;; esac; done ;;
+  grok)  prev=""; for a in "$@"; do [ "$prev" = "--prompt-file" ] && cat "$a" > "$ctl/$name.prompt"; prev="$a"; done ;;
+  codex) prev=""; for a in "$@"; do [ "$prev" = "-o" ] && last_file="$a"; prev="$a"; done
+         for a in "$@"; do :; done
+         if [ "$a" = "-" ]; then cat > "$ctl/$name.prompt"; else printf '%s' "$a" > "$ctl/$name.prompt"; fi ;;
+  claude) cat > "$ctl/$name.prompt" ;;
+esac
+case "$mode" in
+  commit|outside|quota-after-commit) printf 'made by %s (run %s)\n' "$name" "$$" > "helper-work.txt"; git add helper-work.txt && git commit -qm "$name: helper-work.txt" || { echo "stub: commit failed" >&2; exit 3; }
+         [ "$mode" = outside ] && printf 'leak\n' > "$(cat "$ctl/outside.path")" ;;
+  dirty|gitconfig|hook|secret|ledger|fsmon|pointer|ignledger|commondir|secret-answer|exclude) printf 'made by %s, uncommitted\n' "$name" > "helper-work.txt"
+         [ "$mode" = gitconfig ] && git config --local stub.planted yes
+         if [ "$mode" = hook ]; then hd="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; mkdir -p "$hd"
+           printf '#!/bin/sh\n: > "%s/hook-ran"\n' "$ctl" > "$hd/pre-commit"; chmod +x "$hd/pre-commit"; fi
+         if [ "$mode" = ignledger ]; then printf '.agents/security/false-positives.yaml\n' >> .gitignore
+           mkdir -p .agents/security; printf 'suppress-all\n' > .agents/security/false-positives.yaml; fi
+         if [ "$mode" = commondir ]; then gd="$(git rev-parse --path-format=absolute --git-dir)"; cd0="$(git rev-parse --path-format=absolute --git-common-dir)"
+           cp -R "$cd0" "$PWD/.fakegit"; printf '#!/bin/sh\necho ran >> "%s/fsmon-ran"\n' "$ctl" > "$ctl/fsmon.sh"; chmod +x "$ctl/fsmon.sh"
+           printf '[core]\n\tfsmonitor = %s\n' "$ctl/fsmon.sh" >> "$PWD/.fakegit/config"; printf '%s\n' "$PWD/.fakegit" > "$gd/commondir"; fi
+         { [ "$mode" = secret ] || [ "$mode" = ignledger ]; } && printf 'token = "%s%s"\n' "gh""p_" "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5" > leaked.py
+         [ "$mode" = ledger ] && { mkdir -p .agents/security; printf 'entries: []\n' > .agents/security/false-positives.yaml; }
+         if [ "$mode" = fsmon ]; then printf '#!/bin/sh\necho ran >> "%s/fsmon-ran"\n' "$ctl" > "$ctl/fsmon.sh"; chmod +x "$ctl/fsmon.sh"
+           git config core.fsmonitor "$ctl/fsmon.sh"; fi
+         [ "$mode" = pointer ] && printf 'gitdir: %s/.evil\n' "$PWD" > .git
+         [ "$mode" = exclude ] && printf 'helper-work.txt\n' >> "$(git rev-parse --path-format=absolute --git-common-dir)/info/exclude" ;;
+esac
+case "$mode" in
+  quota|quota-after-commit) echo "You've hit your usage limit. Try again at Sep 19th, 2026 1:15 PM." >&2; exit 1 ;;
+  quota429) echo '{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}' >&2; exit 1 ;;
+  empty) echo '{"conversation_id":"t","status":"SUCCESS","response":"","usage":{"input_tokens":100,"output_tokens":0}}'; exit 0 ;;
+  login) echo "Error: not logged in — run '$name login' first." >&2; exit 1 ;;
+  hang)  sleep 60; exit 0 ;;
+  crash) echo "boom: internal error" >&2; exit 2 ;;
+  badmodel) echo "error: the model you asked for is not supported for this account" >&2; exit 1 ;;
+esac
+if [ "$mode" = err-secret ]; then
+  printf 'boom: auth failed with token %s%s\n' "gh""p_" "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5" >&2; exit 2
+fi
+if [ "$mode" = secret-answer ] || [ "$mode" = secret-answer-ro ]; then
+  tok="$(printf '%s%s' "gh""p_" "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5")"
+  case "$name" in
+    codex) prev=""; for a in "$@"; do [ "$prev" = "-o" ] && printf 'done; key used: %s\n' "$tok" > "$a"; prev="$a"; done
+           echo '{"type":"turn.completed","usage":{"input_tokens":303,"output_tokens":11}}' ;;
+    claude) printf '{"type":"result","is_error":false,"result":"done; key used: %s","usage":{"input_tokens":404,"output_tokens":13}}\n' "$tok" ;;
+    grok)  printf '{"text":"done; key used: %s","usage":{"input_tokens":202,"output_tokens":9}}\n' "$tok" ;;
+    agy)   printf '{"status":"SUCCESS","response":"done; key used: %s","usage":{"input_tokens":101,"output_tokens":7}}\n' "$tok" ;;
+  esac
+  exit 0
+fi
+case "$name" in
+  agy)   echo '{"conversation_id":"t","status":"SUCCESS","response":"pong (agy)\n","usage":{"input_tokens":101,"output_tokens":7}}' ;;
+  grok)  echo '{"text":"pong (grok)","usage":{"input_tokens":202,"output_tokens":9},"total_cost_usd":0.0123}' ;;
+  codex) [ -n "$last_file" ] && printf 'pong (codex)\n' > "$last_file"
+         echo '{"type":"thread.started","thread_id":"t"}'
+         echo '{"type":"turn.completed","usage":{"input_tokens":303,"output_tokens":11}}' ;;
+  claude) echo '{"type":"result","subtype":"success","is_error":false,"result":"pong (claude)\n## Результат\nfake done","usage":{"input_tokens":404,"output_tokens":13},"total_cost_usd":0.0456}' ;;
+esac
+exit 0

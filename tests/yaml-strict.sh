@@ -135,6 +135,69 @@ echo "yaml-strict: checked $TOTAL files with $INTERPRETER"
 if [ "$RC" -ne 0 ]; then
   FAIL_COUNT=$(printf '%s\n' "$OUTPUT" | grep -c '^FAIL: ' || true)
   echo "yaml-strict: $FAIL_COUNT file(s) FAILED strict frontmatter parse (see FAIL lines above)"
+fi
+
+# --- agents/index.yaml (T-117): a WHOLE-document strict parse ---------------
+# Not a frontmatter file (no "---" fences), so it never went through the
+# check above — found live in review: this script's own docstring says
+# "every agents/*.md file" and means exactly that, nothing else. Absent
+# file is not an error (pre-T-117 checkouts, or a future rename); present
+# and malformed is exactly the class of bug PY_CHECK/RB_CHECK exist to
+# catch elsewhere.
+INDEX_YAML="$ROOT/agents/index.yaml"
+IDX_RC=0
+if [ -f "$INDEX_YAML" ]; then
+  IDX_PY_CHECK='
+import sys, yaml
+try:
+    d = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+except Exception as e:
+    print("FAIL: %s" % sys.argv[1])
+    print("    %s" % str(e).replace("\n", " | "))
+    sys.exit(1)
+if not isinstance(d, dict) or not isinstance(d.get("roles"), list):
+    print("FAIL: %s" % sys.argv[1])
+    print("    expected a mapping with a list under \"roles\", got %r" % (d,))
+    sys.exit(1)
+n = len(d["roles"])
+print("roles is a list of %d entr%s" % (n, "y" if n == 1 else "ies"))
+sys.exit(0)
+'
+  IDX_RB_CHECK='
+require "yaml"
+require "date"
+begin
+  data = YAML.safe_load(File.read(ARGV[0], encoding: "utf-8"), permitted_classes: [Date, Time], aliases: false)
+rescue StandardError => e
+  puts "FAIL: #{ARGV[0]}"
+  puts "    #{e.message.gsub("\n", " | ")}"
+  exit 1
+end
+unless data.is_a?(Hash) && data["roles"].is_a?(Array)
+  puts "FAIL: #{ARGV[0]}"
+  puts "    expected a mapping with a list under \"roles\", got #{data.class}"
+  exit 1
+end
+n = data["roles"].length
+puts "roles is a list of #{n} entr#{n == 1 ? "y" : "ies"}"
+exit 0
+'
+  set +e
+  if [ "$INTERPRETER" = "python3" ]; then
+    IDX_OUTPUT="$(python3 -c "$IDX_PY_CHECK" "$INDEX_YAML" 2>&1)"; IDX_RC=$?
+  else
+    IDX_OUTPUT="$(ruby -e "$IDX_RB_CHECK" "$INDEX_YAML" 2>&1)"; IDX_RC=$?
+  fi
+  set -e
+  if [ "$IDX_RC" -ne 0 ]; then
+    echo "$IDX_OUTPUT"
+    echo "yaml-strict: agents/index.yaml FAILED strict validation (see FAIL line above)"
+  else
+    echo "yaml-strict: agents/index.yaml PASS ($IDX_OUTPUT)"
+  fi
+fi
+
+if [ "$RC" -ne 0 ] || [ "$IDX_RC" -ne 0 ]; then
   exit 1
 fi
 echo "yaml-strict: all $TOTAL files PASS"

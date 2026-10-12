@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""pre-commit — the secret-scan gate on a commit (T-088).
+
+Why. Rule §4 of the global rules requires "a secret scan before every commit",
+but until this package the rule held only on the agent remembering to run the
+scan by hand: `.git/hooks` had no pre-commit, and neither `core.hooksPath` nor
+`init.templateDir` was set. A rule without a gate is a wish, not a rule.
+
+What it does: runs gitleaks over what ACTUALLY goes into the commit (the
+index), matches the findings against the project's ledger of known false
+positives (`.agents/security/false-positives.yaml`) and prints a verdict WITH
+THE VOLUME that was scanned. The only bypass is explicit and visible:
+`git commit --no-verify`. gitleaks' own bypasses (a `# gitleaks:allow` comment
+on the line, a `.gitleaksignore` file) are switched off / forbidden: exceptions
+go through the false-positives ledger only.
+
+Main invariant (§5 of the rules): secret values NEVER leave the process.
+The gitleaks report lives in this process's memory only — it is not written
+to disk, not printed and not logged. The output carries only the finding's
+coordinates (file, line, rule) and the `fingerprint` — a sha256 of the match,
+an irreversible digest. Anything still quoted from foreign output goes through
+`mask()`.
+
+Why NOT `--redact` (a deviation from the letter of the brief, checked on
+2026-09-11 with gitleaks 8.30.1): `--redact` blanks the `Secret` field in the
+JSON REPORT too — `Secret` becomes the string "REDACTED". The false-positives
+ledger computes the fingerprint from `Secret`, so with `--redact` every
+finding would get the same digest sha256("REDACTED"): live ledger entries
+would stop matching, and any new entry with that hash would suppress
+EVERYTHING — a silent fail-open instead of protection. So masking is done by
+architecture (the value never leaves the process), not by a flag.
+
+Exit codes: 0 — clean (the commit goes on); 1 — active findings, or the scan
+did not run (the commit is stopped). "Could not check" ALWAYS means "stop",
+never "clean" (§11): a silent success is the very defect this package exists for.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+CONFIG = HERE / "pf-secret-rules.toml"
+LEDGER_TOOL = HERE.parent / "gitleaks-fp-ledger.py"
+LEDGER_REL = pathlib.Path(".agents/security/false-positives.yaml")
+BYPASS = "обход — только явно: git commit --no-verify (и объясни в журнале, почему)"
+
+# A belt on top of the braces for QUOTES from foreign output (gitleaks stderr,
+# the ledger error text, an exception message): theoretically anything can end
+# up there. The mask is NOT applied to the finding's own coordinates — see below.
+# Values do not get here anyway, but a mistake costs a leak and the check costs nothing.
+_KEYISH = re.compile(r"[A-Za-z0-9_\-+/=]{16,}")
+
+
+def mask(s: str) -> str:
+    return _KEYISH.sub("<скрыто>", s)
+
+
+def fail(msg: str) -> "int":
+    print(f"✗ секрет-скан НЕ пройден: {msg}", file=sys.stderr)
+    return 1
+
+
+def git(*args: str) -> "subprocess.CompletedProcess[str]":
+    return subprocess.run(["git", *args], capture_output=True, text=True)
+
+
+def load_ledger_module():
+    """The ledger logic is reused, not rewritten (T-045).
+
+    A file name with hyphens cannot be imported with a plain `import`, so it is
+    loaded by path. A missing or broken module is an error, not "we work
+    without the ledger": without it a finding legitimately suppressed by the
+    ledger would stop the commit, and people fix that by switching the gate
+    off — the worst outcome.
+    """
+    spec = importlib.util.spec_from_file_location("gitleaks_fp_ledger", LEDGER_TOOL)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"не удалось загрузить {LEDGER_TOOL}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for name in ("normalize_gitleaks", "load_ledger", "reconcile"):
+        if not hasattr(mod, name):
+            raise ImportError(f"{LEDGER_TOOL}: нет функции {name}() — интерфейс реестра разошёлся")
+    return mod
+
+
+def main() -> int:
+    root_p = git("rev-parse", "--show-toplevel")
+    if root_p.returncode != 0:
+        return fail("не удалось определить корень репозитория (git rev-parse)")
+    root = pathlib.Path(root_p.stdout.strip())
+
+    if not CONFIG.is_file():
+        return fail(f"нет файла правил {CONFIG} — сканировать нечем")
+    if not LEDGER_TOOL.is_file():
+        return fail(f"нет {LEDGER_TOOL} — реестр ложных срабатываний не подключить")
+
+    gl = shutil.which("gitleaks")
+    if not gl:
+        return fail("в PATH нет gitleaks — проверка НЕ выполнена (ставится `brew install gitleaks`); " + BYPASS)
+
+    staged = [x for x in git("diff", "--cached", "--name-only").stdout.splitlines() if x]
+    if not staged:
+        return fail("индекс пуст, сканировать НЕЧЕГО — это не «чисто», а «проверка не отработала». "
+                    "Добавь файлы (git add) или, если коммит намеренно пустой/только сообщение, " + BYPASS)
+
+    # The index is not empty, but there is no content in it (deletions only).
+    # This is a legitimate case and it is named aloud: a silent zero here is
+    # indistinguishable from a breakage.
+    content = [x for x in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").stdout.splitlines() if x]
+    if not content:
+        print(f"✓ секрет-скан: в индексе только удаления/переименования без содержимого "
+              f"({len(staged)} путей) — сканировать нечего, это законно")
+        return 0
+
+    # gitleaks has two OWN bypasses, and both are silent: a `gitleaks:allow`
+    # comment in a line and a `.gitleaksignore` file in the root. Neither goes
+    # through the §5 ledger discipline (fingerprint + scope + rule + reason +
+    # who recognised it + review date) and neither is a declared bypass
+    # (`--no-verify`). The first is switched off by a flag; the second is NOT
+    # switched off by a flag (checked on 8.30.1: `-i` with an empty file or a
+    # foreign path still reads the root file) — so its mere presence is a stop.
+    gli = root / ".gitleaksignore"
+    if gli.exists():
+        return fail(f"в корне лежит {gli.name} — это тихий обход сканера вне реестра §5; "
+                    f"исключения только через {LEDGER_REL}. Убери файл или, осознанно, " + BYPASS)
+
+    # The report goes to stdout (-r -) and stays in memory: raw values never
+    # reach the disk. gitleaks logs go to stderr, separately.
+    run = subprocess.run(
+        [gl, "git", "--staged", "--no-banner", "--no-color", "--ignore-gitleaks-allow",
+         "-f", "json", "-r", "-", "-c", str(CONFIG)],
+        capture_output=True, text=True, cwd=str(root),
+    )
+    # 0 — no findings, 1 — there are findings (some may be covered by the ledger).
+    # Any other code means the scan did not run, and that is a stop, not "clean".
+    if run.returncode not in (0, 1):
+        tail = mask((run.stderr or "").strip().splitlines()[-1]) if run.stderr.strip() else "(stderr пуст)"
+        return fail(f"gitleaks завершился с кодом {run.returncode}: {tail}")
+
+    m = re.search(r"scanned ~(\d+) bytes", run.stderr or "")
+    if not m:
+        # A verdict without a volume is not a verdict: without this line "scanned
+        # and clean" cannot be told from "scanned nothing".
+        return fail("в выводе gitleaks нет строки об объёме (`scanned ~N bytes`) — "
+                    "нечем доказать, что скан вообще что-то прочитал")
+    scanned_bytes = int(m.group(1))
+
+    try:
+        report = json.loads(run.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        return fail(f"отчёт gitleaks не разобрался как JSON: {exc}")
+    if not isinstance(report, list):
+        return fail("отчёт gitleaks не в ожидаемом формате (ожидался список находок)")
+    # gitleaks answers with code 1 both for "there are findings" and for some
+    # fatal errors. Code 1 with an EMPTY report is the second: it cannot be turned into "clean".
+    if run.returncode == 1 and not report:
+        tail = mask((run.stderr or "").strip().splitlines()[-1]) if run.stderr.strip() else "(stderr пуст)"
+        return fail(f"gitleaks вернул код 1, но отчёт пуст — скан не отработал: {tail}")
+
+    try:
+        led = load_ledger_module()
+    except Exception as exc:  # noqa: BLE001 — any module breakage = stop
+        return fail(f"реестр ложных срабатываний не загрузился: {mask(str(exc))}")
+
+    ledger_path = root / LEDGER_REL
+    try:
+        entries = led.load_ledger(ledger_path if ledger_path.is_file() else None)
+    except SystemExit:
+        # load_ledger prints its own ERROR and exits with code 2. A broken ledger
+        # is "could not check", not "checked and it is clean".
+        return fail(f"реестр {ledger_path} нечитаем (сообщение выше) — разбери файл")
+
+    try:
+        findings = led.normalize_gitleaks(report)
+    except Exception as exc:  # noqa: BLE001 — e.g. RedactedReportError: the report cannot be matched = stop
+        return fail(f"отчёт gitleaks не принят реестром: {mask(str(exc))}")
+    active, suppressed, _stale, rejected = led.reconcile(findings, entries)
+
+    # Stale ledger entries are NOT printed — this hook has NO RIGHT to hand
+    # down such a verdict (T-045). The fingerprint here is the same as in the
+    # history audit (sha256 of the Secret field — normalize_gitleaks is shared);
+    # what differs is the scan WINDOW: `git --staged` sees only the staged diff
+    # of one commit, and "the entry matched nothing" is the norm here — its file
+    # is simply not in this commit. The two-sided check lives in
+    # gitleaks-fp-ledger.py and is switched on there only by an explicit
+    # `--window full` (a report over the full history). This is exactly where
+    # the old hand-written hook of a client project tripped (`protect --staged` → a script
+    # with no declared window → "18 stale" on every commit, 14–17.08 and 14–16.09).
+    for r in rejected:
+        entry = r.get("entry")
+        eid = entry.get("id", "?") if isinstance(entry, dict) else "?"
+        print(f"⚠ запись реестра '{eid}' отклонена: {mask(str(r.get('reason')))}", file=sys.stderr)
+
+    volume = f"файлов: {len(content)}, байт: {scanned_bytes}"
+    if active:
+        for f in active:
+            fp = f.get("fingerprint")
+            fp_s = (fp[:12] + "…") if fp else "нет-Secret"
+            # The finding's coordinates are NOT masked: file/line/rule come from
+            # the report metadata and the configs, and by construction there is no
+            # match value in them (normalize_gitleaks does not put Secret into a
+            # finding at all). The first version ran them through mask() — and that
+            # ate rule names and long paths: the verdict lost exactly what it is printed for.
+            print(f"  ✗ {f.get('file')}:{f.get('line')} [{f.get('rule')}] "
+                  f"fingerprint={fp_s}", file=sys.stderr)
+        print(f"  (значение не печатается — §5; по fingerprint заводится запись реестра "
+              f"{LEDGER_REL}, если совпадение доказанно ложное)", file=sys.stderr)
+        return fail(f"активных находок: {len(active)} из {len(findings)} ({volume}). " + BYPASS)
+
+    tail = f" — подавлено записями реестра: {len(suppressed)}" if suppressed else ""
+    print(f"✓ секрет-скан: чисто ({volume}){tail}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

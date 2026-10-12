@@ -231,6 +231,40 @@ if require_subharness_ran "codex-review-harness" "$cr_rc" "$cr_out"; then
 fi
 
 # ===========================================================================
+# Sub-harnesses added by the 2026-09-20 fix pass (SPEC-agent-limits, final
+# review 💭-9 / Consistency № 12): until then CI ran only the codex-review
+# harness above — council.sh, limits.sh, pf-run.sh and plan-budget.sh shipped
+# with their own suites never executed here. Same contract as the block
+# above: require_subharness_ran (rc 0/1 = a real run), then the per-case FAIL
+# labels («  - label» lines of the "Failed:" summary, lib.sh format) against
+# the allowlist. Each one's own summary is printed for the human reader.
+run_lib_subharness() {
+  # run_lib_subharness <label> <script>
+  local label="$1" script="$2" out rc raw
+  if [ ! -f "$script" ]; then
+    fail "$label: $script missing — the script it covers would ship untested"
+    return
+  fi
+  out=$("$BASH_BIN" "$script" 2>&1); rc=$?
+  printf '%s\n' "$out" | grep -E '^(TOTAL|RESULT|PASS:|FAIL )' | tail -6
+  if require_subharness_ran "$label" "$rc" "$out"; then
+    raw=$(pf_mktemp_file pfwf-sub-raw)
+    printf '%s\n' "$out" | grep '^  - ' | sed 's/^  - //' > "$raw"
+    check_against_allowlist "$label" "$raw"
+    rm -f "$raw"
+  fi
+}
+# ===========================================================================
+group "council.sh harness (skills/pf-do/scripts/tests/council.sh)"
+# ===========================================================================
+run_lib_subharness "council-harness" "$ROOT/skills/pf-do/scripts/tests/council.sh"
+
+# ===========================================================================
+group "pf-run.sh harness (skills/pf-do/scripts/tests/pf-run.sh, output diet)"
+# ===========================================================================
+run_lib_subharness "pf-run-harness" "$ROOT/skills/pf-do/scripts/tests/pf-run.sh"
+
+# ===========================================================================
 group "yaml-strict.sh (skills/*/SKILL.md + agents/*.md frontmatter, T-009)"
 # ===========================================================================
 ys_out=$("$BASH_BIN" "$TESTS_DIR/yaml-strict.sh" 2>&1); ys_rc=$?
@@ -240,6 +274,273 @@ if require_subharness_ran "yaml-strict" "$ys_rc" "$ys_out"; then
   printf '%s\n' "$ys_out" | grep '^FAIL: ' | sed "s|^FAIL: $ROOT/||" > "$ys_raw"
   check_against_allowlist "yaml-strict" "$ys_raw"
   rm -f "$ys_raw"
+fi
+
+# ===========================================================================
+group "agents/index.yaml validity (T-117, pf-agents scaffold)"
+# ===========================================================================
+# yaml-strict.sh above never touches this file (it walks *.md only) — that
+# gap is exactly what a hostile review of T-117 found (a broken index.yaml
+# would pass every other check in this suite). This is the real check:
+# strict-parse index.yaml with an actual YAML loader and shape-check the
+# result, the same way yaml-strict.sh does for frontmatter.
+IY_FILE="$ROOT/agents/index.yaml"
+if [ ! -f "$IY_FILE" ]; then
+  echo "SKIP  agents/index.yaml not present in this checkout — nothing to validate (pre-sync, or a layout without it)"
+elif ! python3 -c "import yaml" >/dev/null 2>&1; then
+  echo "SKIP  no python3 with the 'yaml' module (pyyaml) — agents/index.yaml NOT validated this run (this is NOT the same as 'valid')"
+else
+  iy_out=$(python3 -c '
+import sys, yaml
+try:
+    d = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+except Exception as e:
+    print("PARSE ERROR: %s" % e)
+    sys.exit(1)
+if not isinstance(d, dict) or not isinstance(d.get("roles"), list):
+    print("SHAPE ERROR: expected a mapping with a list under \"roles\", got %r" % (d,))
+    sys.exit(1)
+print("roles is a list of %d entr%s" % (len(d["roles"]), "y" if len(d["roles"]) == 1 else "ies"))
+' "$IY_FILE" 2>&1); iy_rc=$?
+  if [ "$iy_rc" = 0 ]; then
+    pass "agents/index.yaml: $iy_out"
+  else
+    fail "agents/index.yaml failed strict validation" "$iy_out"
+  fi
+fi
+
+# ===========================================================================
+group "wait-guard.sh Stop hook (T-110): tests/wait-guard.sh against hooks/wait-guard.sh"
+# ===========================================================================
+wg_out=$("$BASH_BIN" "$TESTS_DIR/wait-guard.sh" 2>&1); wg_rc=$?
+wg_tail=$(printf '%s\n' "$wg_out" | tail -1)
+if [ "$wg_rc" = 0 ]; then
+  pass "wait-guard: $wg_tail"
+else
+  fail "wait-guard suite red (rc=$wg_rc): $wg_tail" "$wg_out"
+fi
+
+# ===========================================================================
+group "install.sh keeps someone else's hook registration (T-187): KEPT, --force, --sync, missing file"
+# ===========================================================================
+# A registration of our hook that points at an EXISTING file outside this
+# clone (a canon checkout, another copy) is someone else's wiring: install.sh
+# (and --sync) must leave it and print KEPT; --force points it here; a
+# registration whose file is gone is ours to repair. HOME and the settings
+# file are temporary — never the real ~/.claude.
+if command -v python3 >/dev/null 2>&1; then
+  wk_root="$(mktempdir)"; wk_foreign="$wk_root/canon"; mkdir -p "$wk_foreign" "$wk_root/home"
+  printf '#!/bin/bash\nexit 0\n' > "$wk_foreign/wait-guard.sh"; chmod +x "$wk_foreign/wait-guard.sh"
+  wk_ours="$ROOT/hooks/wait-guard.sh"
+  wk_kept_line="KEPT: Stop → $wk_foreign/wait-guard.sh (registered elsewhere; re-run with --force to point it at this clone)"
+  wk_settings() { # wk_settings <file> <dir of the registered wait-guard.sh>
+    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash %s/wait-guard.sh","timeout":40}]}]}}\n' "$2" > "$1"
+  }
+  # stop_paths <settings> — the wait-guard.sh paths the Stop commands name.
+  stop_paths() {
+    python3 - "$1" <<'PYEOF'
+import json, re, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for it in d.get("hooks", {}).get("Stop", []):
+    for h in it.get("hooks", []):
+        m = re.search(r"'([^']*/wait-guard\.sh)'|(/\S*/wait-guard\.sh)", h.get("command", ""))
+        print(m.group(1) or m.group(2) if m else "?")
+PYEOF
+  }
+  for mode in full sync; do
+    args=(); [ "$mode" = sync ] && args=(--sync)
+    s="$wk_root/kept-$mode.json"; wk_settings "$s" "$wk_foreign"
+    o=$(HOME="$wk_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" "${args[@]+"${args[@]}"}" 2>&1); r=$?
+    if [ "$r" = 0 ] && [ "$(stop_paths "$s")" = "$wk_foreign/wait-guard.sh" ] && printf '%s\n' "$o" | grep -qxF "$wk_kept_line"; then
+      pass "[$mode] Stop registered at an existing file outside the clone -> KEPT line, entry untouched"
+    else
+      fail "[$mode] the foreign Stop registration was not kept (rc=$r)" "$o | $(stop_paths "$s")"
+    fi
+    s="$wk_root/force-$mode.json"; wk_settings "$s" "$wk_foreign"
+    o=$(HOME="$wk_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" "${args[@]+"${args[@]}"}" --force 2>&1); r=$?
+    if [ "$r" = 0 ] && [ "$(stop_paths "$s")" = "$wk_ours" ] && ! printf '%s' "$o" | grep -q '^KEPT' && grep -q '"timeout": 40' "$s"; then
+      pass "[$mode] --force -> Stop points at this clone (manual timeout 40 kept), no KEPT line"
+    else
+      fail "[$mode] --force did not repoint Stop (rc=$r)" "$o | $(stop_paths "$s")"
+    fi
+    s="$wk_root/gone-$mode.json"; wk_settings "$s" "$wk_root/gone"
+    o=$(HOME="$wk_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" "${args[@]+"${args[@]}"}" 2>&1); r=$?
+    if [ "$r" = 0 ] && [ "$(stop_paths "$s")" = "$wk_ours" ] && ! printf '%s' "$o" | grep -q '^KEPT'; then
+      pass "[$mode] Stop registered at a missing file -> upsert to this clone, no KEPT line"
+    else
+      fail "[$mode] a Stop registration pointing at a missing file was not repaired (rc=$r)" "$o | $(stop_paths "$s")"
+    fi
+  done
+else
+  echo "SKIP  python3 not available — install.sh needs it to register hooks"
+fi
+
+# ===========================================================================
+group "pf-session-id.sh SessionStart hook (T-191, QA Ж-5; renamed T-193, Н-4): tests/pf-session-id.sh against hooks/pf-session-id.sh"
+# ===========================================================================
+si_out=$("$BASH_BIN" "$TESTS_DIR/pf-session-id.sh" 2>&1); si_rc=$?
+si_tail=$(printf '%s\n' "$si_out" | tail -1)
+if [ "$si_rc" = 0 ]; then
+  pass "pf-session-id: $si_tail"
+else
+  fail "pf-session-id suite red (rc=$si_rc): $si_tail" "$si_out"
+fi
+
+# ===========================================================================
+group "install.sh hook registration hardening (T-191, QA Ж-2 / Ж-3 / Ж-4)"
+# ===========================================================================
+# Ж-2: a clone path with an apostrophe gives a command that parses (rc 0
+# under /bin/sh and dash, never the 2 that keeps a Stop hook blocking), and a
+# second run reads it back as OURS (unchanged, no KEPT). Ж-3: our hook shares
+# a group with a foreign one — only our object is replaced, the neighbour and
+# the group's matcher stay. Ж-4: the backup copy gets the mode of a 0600
+# settings file. Temporary HOME and settings file only.
+if command -v python3 >/dev/null 2>&1; then
+  ih_root="$(mktempdir)"; mkdir -p "$ih_root/home"
+  ih_clone="$ih_root/Mike's tools/pf-workflow"; mkdir -p "$ih_clone"
+  ( cd "$ROOT" && tar cf - --exclude ./.git --exclude ./.claude . ) | ( cd "$ih_clone" && tar xf - )
+  s="$ih_root/apos.json"; printf '{}\n' > "$s"
+  o1=$(HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ih_clone/install.sh" --sync 2>&1); r1=$?
+  ih_cmd=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([h["command"] for g in d["hooks"]["Stop"] for h in g["hooks"] if "wait-guard" in h["command"]][0])' "$s" 2>&1)
+  sh_rc=$(printf '{}' | HOME="$ih_root/home" /bin/sh -c "$ih_cmd" >/dev/null 2>&1; echo $?)
+  dash_rc=0; if [ -x /bin/dash ]; then dash_rc=$(printf '{}' | HOME="$ih_root/home" /bin/dash -c "$ih_cmd" >/dev/null 2>&1; echo $?); fi
+  o2=$(HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ih_clone/install.sh" --sync 2>&1); r2=$?
+  if [ "$r1" = 0 ] && [ "$sh_rc" = 0 ] && [ "$dash_rc" = 0 ] && [ "$r2" = 0 ] && printf '%s' "$o2" | grep -q 'unchanged' && ! printf '%s' "$o2" | grep -q '^KEPT'; then
+    pass "Ж-2: clone path with an apostrophe -> Stop command parses (sh rc $sh_rc, dash rc $dash_rc); re-run reads it as ours (unchanged, no KEPT)"
+  else
+    fail "Ж-2: apostrophe in the clone path (install rc=$r1/$r2, sh rc=$sh_rc, dash rc=$dash_rc)" "$o1 | $o2 | $ih_cmd"
+  fi
+  # A foreign registration at an existing path WITH an apostrophe is still KEPT.
+  ih_for="$ih_root/O'Brien canon"; mkdir -p "$ih_for"; printf '#!/bin/bash\nexit 0\n' > "$ih_for/wait-guard.sh"; chmod +x "$ih_for/wait-guard.sh"
+  s="$ih_root/kept-apos.json"
+  python3 -c '
+import json, sys
+q = sys.argv[2].replace("\x27", "\x27\\\x27\x27")
+json.dump({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "bash \x27%s\x27" % q, "timeout": 15}]}]}}, open(sys.argv[1], "w"))' "$s" "$ih_for/wait-guard.sh"
+  o=$(HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" --sync 2>&1); r=$?
+  if [ "$r" = 0 ] && printf '%s\n' "$o" | grep -qxF "KEPT: Stop → $ih_for/wait-guard.sh (registered elsewhere; re-run with --force to point it at this clone)"; then
+    pass "Ж-2: a foreign Stop registration whose path has an apostrophe -> KEPT, not overwritten"
+  else
+    fail "Ж-2: foreign registration with an apostrophe was not kept (rc=$r)" "$o | $(cat "$s")"
+  fi
+  # Ж-3
+  s="$ih_root/group.json"
+  printf '%s\n' '{"hooks":{"Stop":[{"matcher":"m1","hooks":[{"type":"command","command":"/opt/my/notify-done.sh","timeout":30},{"type":"command","command":"bash '"'"'/old/place/pf-workflow/hooks/wait-guard.sh'"'"'","timeout":15}]}]}}' > "$s"
+  o=$(HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" --sync 2>&1); r=$?
+  ih_g=$(python3 -c '
+import json, sys
+g = json.load(open(sys.argv[1]))["hooks"]["Stop"]
+print(len(g), g[0].get("matcher"), [h["command"] for h in g[0]["hooks"]][0], sum(sys.argv[2] + "/hooks/wait-guard.sh" in h["command"] for h in g[0]["hooks"]))' "$s" "$ROOT" 2>&1)
+  if [ "$r" = 0 ] && [ "$ih_g" = "1 m1 /opt/my/notify-done.sh 1" ]; then
+    pass "Ж-3: our hook in a shared group -> only our object replaced; the neighbour, its order and the matcher stay (one group)"
+  else
+    fail "Ж-3: a shared Stop group was not preserved (rc=$r)" "$o | $ih_g | $(cat "$s")"
+  fi
+  o=$(HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" --sync 2>&1)
+  if printf '%s' "$o" | grep -q 'unchanged' && grep -q notify-done "$s"; then
+    pass "Ж-3: a repeat --sync over the shared group -> unchanged, the neighbour still there"
+  else
+    fail "Ж-3: repeat --sync over a shared group changed it" "$o"
+  fi
+  # Ж-4
+  s="$ih_root/mode.json"; printf '{"env":{"SOME_TOKEN":"x"}}\n' > "$s"; chmod 600 "$s"
+  printf 'old\n' > "$s.bak-pf-workflow"; chmod 644 "$s.bak-pf-workflow"
+  HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s" "$BASH_BIN" "$ROOT/install.sh" --sync >/dev/null 2>&1
+  ih_m=$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$s.bak-pf-workflow")
+  s2="$ih_root/mode-new.json"; printf '{}\n' > "$s2"; chmod 600 "$s2"
+  HOME="$ih_root/home" CLAUDE_SETTINGS_PATH="$s2" "$BASH_BIN" "$ROOT/install.sh" --sync >/dev/null 2>&1
+  ih_m2=$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$s2.bak-pf-workflow")
+  if [ "$ih_m" = 0o600 ] && [ "$ih_m2" = 0o600 ] && grep -q SOME_TOKEN "$s.bak-pf-workflow"; then
+    pass "Ж-4: backup of a 0600 settings.json is 0600 (an old 0644 copy is tightened, a new one is born 0600)"
+  else
+    fail "Ж-4: backup mode is not the original's" "existing copy: $ih_m, new copy: $ih_m2"
+  fi
+else
+  echo "SKIP  python3 not available — install.sh needs it to register hooks"
+fi
+
+# ===========================================================================
+group "private-words stop-list (T-191, QA К-1): no author's project names in this tree"
+# ===========================================================================
+# The list lives OUTSIDE the distribution (${PF_PRIVATE_WORDS:-<canon>/
+# security/private-words.txt}; one word or grep -E pattern per line,
+# case-insensitive). No list (a friend's clone) — only the negative control
+# below runs. pw_scan prints file:line, never the word itself.
+pw_scan() {  # pw_scan <root> <list> -> file:line hits on stdout; rc 2 when grep failed
+  local root="$1" list="$2" pat err out=""
+  pat=$(pf_mktemp_file pfwf-pwpat); err=$(pf_mktemp_file pfwf-pwerr)
+  grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$list" > "$pat" || true
+  if [ -s "$pat" ]; then
+    out="$(cd "$root" && find . -type f -not -path './.git/*' -not -path './.git' -not -path './.claude/*' -print0 \
+      | xargs -0 grep -I -i -n -E -f "$pat" -- /dev/null 2>"$err" | cut -d: -f1,2 | sed 's|^\./||')" || true
+  fi
+  if [ -s "$err" ]; then rm -f "$pat" "$err"; return 2; fi
+  rm -f "$pat" "$err"; printf '%s' "$out"
+}
+pw_list="${PF_PRIVATE_WORDS:-}"
+if [ -z "$pw_list" ]; then
+  pw_common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  for c in "${PF_TOOLS:-}" "$ROOT/../.." "${pw_common:+$pw_common/../../..}"; do
+    if [ -n "$c" ] && [ -f "$c/security/private-words.txt" ]; then pw_list="$c/security/private-words.txt"; break; fi
+  done
+fi
+if [ -n "$pw_list" ] && [ -f "$pw_list" ]; then
+  pw_hits="$(pw_scan "$ROOT" "$pw_list")"; pw_rc=$?
+  if [ "$pw_rc" = 0 ] && [ -z "$pw_hits" ]; then
+    pass "no word of the stop-list ($pw_list) in this tree"
+  else
+    fail "stop-list words found in this tree (rc=$pw_rc) — de-personalise them in the canon, re-sync" "$pw_hits"
+  fi
+else
+  echo "SKIP  no private-words list (PF_PRIVATE_WORDS / <canon>/security/private-words.txt) — expected outside the author's machine"
+fi
+pw_neg="$(mktempdir)"; pw_neg_list="$pw_neg/list.txt"
+printf '# test list\n\nzz-private-canary\n' > "$pw_neg_list"
+mkdir -p "$pw_neg/tree/docs"; cp "$ROOT/docs/rules-sections.en.md" "$pw_neg/tree/docs/"
+before_hits="$(pw_scan "$pw_neg/tree" "$pw_neg_list")"
+printf 'mention of ZZ-Private-Canary here\n' >> "$pw_neg/tree/docs/rules-sections.en.md"
+after_hits="$(pw_scan "$pw_neg/tree" "$pw_neg_list")"
+if [ -z "$before_hits" ] && printf '%s\n' "$after_hits" | grep -q '^docs/rules-sections.en.md:[0-9]*$'; then
+  pass "negative control: a list word appended to a copy of a shipped file (other case) -> named as file:line"
+else
+  fail "negative control: the stop-list scan did not catch a planted word" "before=$before_hits after=$after_hits"
+fi
+
+# ===========================================================================
+group "secret scanner copy next to council.sh (T-187): present, executable, equal to the canon"
+# ===========================================================================
+# council.sh finds skills/pf-do/scripts/secret-scan/repo-hooks/pre-commit when
+# there is no _tools canon (friends' machines). sync-from-tools.sh puts the
+# three files there; here: they exist, the hook is executable, and — where a
+# canon is reachable (a dev clone or its worktree, or PF_TOOLS) — they are
+# byte-equal to it. No canon: the equality check is a SKIP, not a FAIL.
+SS_DIR="$ROOT/skills/pf-do/scripts/secret-scan"
+ss_missing=""
+for f in repo-hooks/pre-commit repo-hooks/pf-secret-rules.toml gitleaks-fp-ledger.py; do
+  [ -f "$SS_DIR/$f" ] || ss_missing="$ss_missing $f"
+done
+if [ -z "$ss_missing" ] && [ -x "$SS_DIR/repo-hooks/pre-commit" ]; then
+  pass "secret-scan/: pre-commit (executable), pf-secret-rules.toml, gitleaks-fp-ledger.py are in place"
+else
+  fail "secret-scan/ copy incomplete or pre-commit not executable" "missing:$ss_missing"
+fi
+ss_canon=""
+ss_common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+for c in "${PF_TOOLS:-}" "$ROOT/../.." "${ss_common:+$ss_common/../../..}"; do
+  if [ -n "$c" ] && [ -f "$c/security/repo-hooks/pre-commit" ]; then ss_canon="$c"; break; fi
+done
+if [ -n "$ss_canon" ]; then
+  ss_diff=""
+  for f in repo-hooks/pre-commit repo-hooks/pf-secret-rules.toml gitleaks-fp-ledger.py; do
+    cmp -s "$SS_DIR/$f" "$ss_canon/security/$f" || ss_diff="$ss_diff $f"
+  done
+  if [ -z "$ss_diff" ]; then
+    pass "secret-scan/ copy is byte-equal to the canon ($ss_canon/security)"
+  else
+    fail "secret-scan/ copy differs from the canon — re-run sync-from-tools.sh" "differs:$ss_diff"
+  fi
+else
+  echo "SKIP  no _tools canon reachable — copy-equals-canon not checked (expected outside a dev clone)"
 fi
 
 # ===========================================================================
@@ -290,9 +591,14 @@ group "No real network calls, no real codex CLI reachable in this suite"
 # child at $CR_TESTS/run.sh — a curl/wget added there would have escaped
 # this tripwire forever, even though README promises it "never touches the
 # network" for the exact command that runs that child (T-017 fix round,
-# 🟡 E).
+# 🟡 E). One more carve-out (T-134): tests/limits.sh puts fixtures/fake-curl
+# on the poll PATH as `curl` as a NEGATIVE control — the script under test
+# must never call it (its counter is asserted to stay 0). Lines that name
+# that double (`fake-curl`, its counter `ncurl` / `curl.calls`) are the
+# control, not a network call; a bare `curl https://…` matches none of
+# them and still trips the wire.
 CR_TESTS="$ROOT/skills/pf-do/scripts/tests"
-net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v "^$TESTS_DIR/run\.sh:" || true)
+net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v "^$TESTS_DIR/run\.sh:" | grep -vE 'fake-curl|ncurl|curl\.calls' || true)
 if [ -z "$net_hits" ]; then
   pass "grep -rnE 'curl|wget' tests/ + skills/pf-do/scripts/tests/ (excluding run.sh itself) -> no matches"
 else
