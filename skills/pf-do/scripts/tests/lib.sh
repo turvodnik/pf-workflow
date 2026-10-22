@@ -88,9 +88,15 @@ finish() {
 # process group so a stuck descendant dies with it, not just the leader.
 run_with_timeout() {
   local secs="$1"; shift
+  local cmd_pid killer_pid
+  # Under set -m a non-interactive bash may lose the setpgid race with its own
+  # child and print «child setpgid (N to N): Operation not permitted» (macOS
+  # bash 3.2) into the captured output of a case. Same cure as with_timeout in
+  # council.sh: both forks happen with stderr on /dev/null, the command gets the
+  # real stderr back via fd 8 (a closed stderr gets /dev/null first).
+  : >&2 2>/dev/null || exec 2>/dev/null
   set -m 2>/dev/null || true
-  "$@" &
-  local cmd_pid=$!
+  { "$@" 2>&8 8>&- & cmd_pid=$!; } 8>&2 2>/dev/null
   set +m 2>/dev/null || true
   # The killer needs its OWN process group too: killing only killer_pid
   # leaves ITS `sleep $secs` orphaned (a parent's death does not kill its
@@ -101,10 +107,9 @@ run_with_timeout() {
   # directly tracks is already dead. Confirmed empirically: without this,
   # every call here pays the full timeout regardless of how fast $@ exits.
   set -m 2>/dev/null || true
-  ( sleep "$secs"
+  { ( sleep "$secs"
     kill -0 "$cmd_pid" 2>/dev/null || exit 0
-    kill -KILL -- "-$cmd_pid" 2>/dev/null ) &
-  local killer_pid=$!
+    kill -KILL -- "-$cmd_pid" 2>/dev/null ) & killer_pid=$!; } 2>/dev/null
   set +m 2>/dev/null || true
   { wait "$cmd_pid"; } 2>/dev/null
   local rc=$?

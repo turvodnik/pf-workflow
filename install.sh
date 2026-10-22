@@ -238,6 +238,56 @@ if [ "$SYNC" = 1 ]; then
   exit $?
 fi
 
+# Where to keep SOLUTIONS.md (solved-problems log): own GitHub repo or local only.
+# PF_HANDOFF_SOLUTIONS=local|github:<url> answers without a question; no terminal
+# -> silently "local". Written BEFORE the hooks step: this script runs under
+# `set -euo pipefail`, and a non-zero hooks/doctor on a clean HOME would abort
+# it before the file is written. An existing config is kept unless the variable is set;
+# an older config without `solutions_path` gets that one field added (T-180).
+# solutions_path — the file the agent appends to at session close: local ->
+# ~/.config/pf-handoff/SOLUTIONS.md; github -> ~/.config/pf-handoff/solutions/SOLUTIONS.md
+# inside a clone of your repository (the installer prints the clone command, it does not clone).
+choose_solutions_store() {
+  local cfgdir="$HOME/.config/pf-handoff"
+  local cfg="$cfgdir/config.json" ans="${PF_HANDOFF_SOLUTIONS:-}" store="local" repo=""
+  if [ -z "$ans" ] && [ -f "$cfg" ]; then
+    python3 -c 'import json,sys
+p, d = sys.argv[1], sys.argv[2]
+c = json.load(open(p))
+if "solutions_path" not in c:
+    c["solutions_path"] = d + ("/solutions/SOLUTIONS.md" if c.get("solutions_store") == "github" else "/SOLUTIONS.md")
+    json.dump(c, open(p, "w"), indent=2); open(p, "a").write("\n")
+    print("solutions_path added -> " + c["solutions_path"])' "$cfg" "$cfgdir" 2>/dev/null || echo "solutions store: $cfg could not be updated (not readable as JSON, or no write permission) — left as is" >&2
+    return 0
+  fi
+  if [ -z "$ans" ] && [ -t 0 ]; then
+    echo "Where to keep SOLUTIONS.md (solved problems)? 1 — in your own GitHub repository, 2 — locally [default]"
+    read -r -p "1/2 [2]: " ans || ans=""
+    case "$ans" in
+      1) read -r -p "GitHub repository URL: " repo || repo=""; ans="github:$repo" ;;
+      *) ans="local" ;;
+    esac
+  fi
+  case "$ans" in
+    github:?*) store="github"; repo="${ans#github:}" ;;
+    local|"") ;;
+    *) echo "pf-workflow: PF_HANDOFF_SOLUTIONS='$ans' not understood (use local or github:<url>) — using local" >&2 ;;
+  esac
+  local path="$cfgdir/SOLUTIONS.md"
+  [ "$store" = github ] && path="$cfgdir/solutions/SOLUTIONS.md"
+  # Not writable or no python3: say so instead of a false success line (QA 2.1.0, 💭1).
+  if ! mkdir -p "$cfgdir" 2>/dev/null || ! python3 -c 'import json,sys; json.dump({"solutions_store": sys.argv[1], "solutions_repo": sys.argv[2], "solutions_path": sys.argv[3]}, open(sys.argv[4], "w"), indent=2); open(sys.argv[4], "a").write("\n")' "$store" "$repo" "$path" "$cfg" 2>/dev/null; then
+    echo "WARN: cannot write $cfg (permissions or no python3) — SOLUTIONS store not configured; fix it and re-run bash install.sh" >&2
+    return 0
+  fi
+  echo "solutions store: $store${repo:+ ($repo)} -> $cfg (file: $path)"
+  if [ "$store" = github ] && [ ! -d "$cfgdir/solutions/.git" ]; then
+    echo "Clone it once: git clone '$repo' '$cfgdir/solutions'"
+  fi
+}
+
+choose_solutions_store || true
+
 # Surfaces: ~/.claude — always; Codex/Gemini — only if those CLIs exist on
 # this machine (their directory is present): no junk directories.
 SURFACES=("$HOME/.claude/skills")

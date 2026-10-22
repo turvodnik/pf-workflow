@@ -68,6 +68,8 @@ KEPT: Stop → <path> (registered elsewhere; re-run with --force to point it at 
 
 KEPT is not an error: it means "someone's wiring is already there". If you want it to run from this clone instead, run `bash install.sh --force` (works with any mode). A registration that points at a file which no longer exists is repaired without `--force`.
 
+**Where to keep `SOLUTIONS.md`.** If `~/.config/pf-handoff/config.json` already exists (pf-handoff wrote it), the installer does not ask. Otherwise it asks the same question as pf-handoff (`1` — your own GitHub repository, `2` — locally, default; silently local with no terminal), or takes `PF_HANDOFF_SOLUTIONS=local|github:<url>`, and writes the same file — including `solutions_path`, the SOLUTIONS file the agent appends to (added to an older file too; for GitHub, clone your repository with the printed `git clone` command).
+
 ### Update
 
 ```bash
@@ -77,6 +79,35 @@ cd <your clone> && git pull && bash install.sh --update
 The hook entry points into the clone, so `git pull` already updates the hook; skills and agents are copies, so `--update` refreshes them. pf-workflow stands alone: it is installed and updated separately from [pf-handoff](https://github.com/turvodnik/pf-handoff), which has its own `git pull && bash install.sh`. The quiet mode of child CLIs (`PF_COUNCIL_RUN=1`, set by `council.sh`) works with pf-handoff ≥ 2.0.0; with an older pf-handoff the child still gets its start hook's hint to read the HANDOFF and continue — update both.
 
 `.claude-plugin/plugin.json` exists for `claude plugin validate`/`eval` only — it does not declare `hooks`, so installing this repo as a plugin never double-registers `hooks/wait-guard.sh`; the install path above (`install.sh`, writing to `~/.claude/settings.json`) is unchanged.
+
+### Uninstall
+
+Remove only what this installer wrote, keep every other setting (restoring an old backup would roll back everything written since). Run from the clone:
+
+```bash
+f=~/.claude/settings.json
+if [ -f "$f" ]; then cp "$f" "$f.bak-before-uninstall" && python3 - "$f" "$PWD/hooks/" <<'EOF'
+import json, sys
+path, ours = sys.argv[1], sys.argv[2]
+d = json.load(open(path, encoding="utf-8"))
+mine = lambda c: ours in str(c or "").replace("'\\''", "'")
+hooks = d.get("hooks") or {}
+for evt in list(hooks):
+    for g in hooks[evt]:
+        g["hooks"] = [h for h in g.get("hooks", []) if not mine(h.get("command"))]
+    hooks[evt] = [g for g in hooks[evt] if g.get("hooks")]
+    if not hooks[evt]:
+        del hooks[evt]
+json.dump(d, open(path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+EOF
+fi
+for d in skills/*/; do n=$(basename "$d"); for s in ~/.claude/skills ~/.codex/skills ~/.gemini/skills; do
+  { [ "$(readlink "$s/$n")" = "$PWD/skills/$n" ] || grep -q "^name: $n\$" "$s/$n/SKILL.md" 2>/dev/null; } && rm -rf "$s/$n"; done; done
+for a in agents/*.md; do n=$(basename "$a" .md); t=~/.claude/agents/$n.md
+  { [ "$(readlink "$t")" = "$PWD/agents/$n.md" ] || grep -q "^name: $n\$" "$t" 2>/dev/null; } && rm -f "$t"; done
+```
+
+This drops our `Stop` and `SessionStart` entries (those pointing into this clone's `hooks/`), and the skill and agent copies or links that carry our names; anything foreign stays. `~/.config/pf-handoff/config.json` (the SOLUTIONS choice) is shared with pf-handoff: delete `~/.config/pf-handoff` only if pf-handoff is not installed, and move your `SOLUTIONS.md` out first if you keep it there. Finally remove the rules sections you pasted into your `AGENTS.md`/`CLAUDE.md`.
 
 ## For your AI agent
 

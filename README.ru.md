@@ -68,6 +68,8 @@ KEPT: Stop → <путь> (registered elsewhere; re-run with --force to point it
 
 KEPT — не ошибка: это значит «чужая регистрация уже стоит». Если нужно, чтобы хук запускался из этого клона, выполните `bash install.sh --force` (работает с любым режимом). Регистрация на файл, которого уже нет, чинится без `--force`.
 
+**Где хранить `SOLUTIONS.md`.** Если `~/.config/pf-handoff/config.json` уже есть (его записал pf-handoff), установщик не спрашивает. Иначе он задаёт тот же вопрос, что и pf-handoff (`1` — свой репозиторий GitHub, `2` — локально, по умолчанию; без терминала молча «локально»), либо берёт `PF_HANDOFF_SOLUTIONS=local|github:<url>`, и пишет тот же файл — с полем `solutions_path`, файлом SOLUTIONS, куда агент дописывает строку (в старый файл поле дописывается; для GitHub клонируйте репозиторий напечатанной командой `git clone`).
+
 ### Обновление
 
 ```bash
@@ -77,6 +79,35 @@ cd <ваш клон> && git pull && bash install.sh --update
 Запись хука указывает в клон, поэтому `git pull` уже обновляет хук; скиллы и агенты — копии, их обновляет `--update`. pf-workflow самодостаточен: он ставится и обновляется отдельно от [pf-handoff](https://github.com/turvodnik/pf-handoff), у которого свой `git pull && bash install.sh`. Тихий режим дочерних CLI (`PF_COUNCIL_RUN=1`, его ставит `council.sh`) работает с pf-handoff ≥ 2.0.0; с более старым pf-handoff ребёнок получит подсказку хука старта «прочитай HANDOFF и продолжи» — обновите оба.
 
 `.claude-plugin/plugin.json` нужен только для `claude plugin validate`/`eval` — поле `hooks` в нём не объявлено, поэтому установка репозитория как плагина не навешивает `hooks/wait-guard.sh` второй раз; путь установки выше (`install.sh`, запись в `~/.claude/settings.json`) не меняется.
+
+### Удаление
+
+Снять только то, что записал этот установщик, сохранив остальные настройки (восстановление старого бэкапа откатило бы всё, что записано после него). Запускать из клона:
+
+```bash
+f=~/.claude/settings.json
+if [ -f "$f" ]; then cp "$f" "$f.bak-before-uninstall" && python3 - "$f" "$PWD/hooks/" <<'EOF'
+import json, sys
+path, ours = sys.argv[1], sys.argv[2]
+d = json.load(open(path, encoding="utf-8"))
+mine = lambda c: ours in str(c or "").replace("'\\''", "'")
+hooks = d.get("hooks") or {}
+for evt in list(hooks):
+    for g in hooks[evt]:
+        g["hooks"] = [h for h in g.get("hooks", []) if not mine(h.get("command"))]
+    hooks[evt] = [g for g in hooks[evt] if g.get("hooks")]
+    if not hooks[evt]:
+        del hooks[evt]
+json.dump(d, open(path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+EOF
+fi
+for d in skills/*/; do n=$(basename "$d"); for s in ~/.claude/skills ~/.codex/skills ~/.gemini/skills; do
+  { [ "$(readlink "$s/$n")" = "$PWD/skills/$n" ] || grep -q "^name: $n\$" "$s/$n/SKILL.md" 2>/dev/null; } && rm -rf "$s/$n"; done; done
+for a in agents/*.md; do n=$(basename "$a" .md); t=~/.claude/agents/$n.md
+  { [ "$(readlink "$t")" = "$PWD/agents/$n.md" ] || grep -q "^name: $n\$" "$t" 2>/dev/null; } && rm -f "$t"; done
+```
+
+Команда снимает наши записи `Stop` и `SessionStart` (те, что указывают в `hooks/` этого клона) и копии или ссылки скиллов и агентов с нашими именами; чужое остаётся. `~/.config/pf-handoff/config.json` (выбор хранилища SOLUTIONS) общий с pf-handoff: удаляйте `~/.config/pf-handoff`, только если pf-handoff не установлен, и сначала перенесите свой `SOLUTIONS.md`, если храните его там. В конце уберите разделы правил, которые вы вставили в свой `AGENTS.md`/`CLAUDE.md`.
 
 ## Для вашего ИИ-агента
 

@@ -4,6 +4,26 @@
 
 Semver: breaking changes (task-packet frontmatter contract, skill behavior contracts, `.agents/` runtime layout) = major; new features = minor; fixes = patch.
 
+## [2.1.0] — 2026-10-22
+
+### Added
+
+- **Where to keep `SOLUTIONS.md`** (the log of solved problems). If `~/.config/pf-handoff/config.json` does not exist, `install.sh` asks the same question as pf-handoff: `1` — your own GitHub repository, `2` — locally (default; silently local with no terminal); `PF_HANDOFF_SOLUTIONS=local|github:<url>` answers without a question. It writes the same file — `solutions_store`, `solutions_repo`, `solutions_path` (the file the agent appends to); an existing file is kept, an older one only gets `solutions_path` added. For GitHub the installer prints the `git clone` command; it does not clone. If the file cannot be written (no permission on `~/.config`, no `python3`), the installer prints a `WARN` instead of a success line and goes on.
+- **Uninstall instructions** in the README (EN and RU): a command that removes only our `Stop` and `SessionStart` entries from `~/.claude/settings.json` and the skill and agent copies or links that carry our names; what to do with the shared `~/.config/pf-handoff/`.
+- **`pf-retro`:** a new data step — the SOLUTIONS store (`solutions_path` for pf-handoff users): outdated rows go to the archive, contradicting pairs without proof become a proposal, the file stays within 200 lines.
+
+### Changed
+
+- **`pf-auto`:** in Claude Code, jobs stay subagents except a role the human named on another agent («проверь через Antigravity Gemini») or its fallback — that role runs through `council.sh run`.
+- **No mandatory mini-glossary.** `pf-architect` explains terms in the text at first use and gives a recommendation with reasons for every decision of the human; the retro template drops the «Мини-глоссарий» section; `pf-tickets` explains the «last substantive section» wording by service sections that follow the content, not by the glossary.
+- **`pf-do`, step 5b:** the list of pf-handoff hooks without an owning skill no longer names `secrets-guard.sh` (pf-handoff 2.1.0 removes that hook).
+- `council.sh` header names both write paths (`delegate` and `run --role executor`).
+- `tests/run.sh` and CI comments: no leftovers of the removed `limits`/`plan-budget` harnesses.
+
+### Fixed
+
+- **`child setpgid` line on macOS (`council.sh`, `codex-review.sh`, test library):** a helper run or a Codex review could print `child setpgid (N to N): Operation not permitted` to stderr. Cause: bash 3.2 job control (`set -m` in a non-interactive script) — the forked child may lose the `setpgid` race with its parent and prints the line with the stderr it inherited, before its own redirections apply. pf-do starts processes under `set -m` in three files, and the line came out of each: `council.sh` (`with_timeout`), `codex-review.sh` (the Codex run and the detached `--async` launch; once the line landed in the output of a synchronous review) and the test library `skills/pf-do/scripts/tests/lib.sh` (`run_with_timeout`), where it landed in the captured output of a case and turned the suite red at random under load. In all six fork points the child is now forked with stderr muted and still writes its own stderr where it did before (the real stderr, or the file the script already redirected it to). The process groups the timeouts and `--async` rely on are unchanged; the job-control race itself remains, only the stray line is gone. A caller with stderr closed (`2>&-`) still gets the helper run. A static case in the `codex-review.sh` test harness now checks every `set -m` region of the three files, so a new fork without the cure turns the suite red. Checked on macOS (bash 3.2): the two fork forms in a loop, 4 copies at once — the old form printed the line 10 times in 24,000 forks, the new one 0; the full `tests/run.sh`, 4 copies of this code and 4 of the previous candidate at once × 12 rounds — 0 `setpgid` lines in 48 runs (the race is rare: the previous candidate gave 0 there too, an earlier independent check caught it 2 times in 48).
+
 ## [2.0.0] — 2026-10-12
 
 Major by the semver rule above: the installer now registers a hook in your `~/.claude/settings.json` (the install scheme); `pf-auto`, `pf-do` and the executor role gain a waiting contract — a turn may not end in prose while a job is running (skill behavior contracts); the `pf-executor`, `pf-reviewer` and `pf-architect` roles get explicit model, effort and tool settings (role contracts).

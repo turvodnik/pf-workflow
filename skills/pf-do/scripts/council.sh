@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # council.sh — a council of helper CLIs (agy → grok → codex): a READ-ONLY
-# second opinion, plus one gated write path (delegate). The helpers never see
-# the transcript: they get one prompt built from files and arguments, answer
-# once, and their text is material, not a verdict (canon §11) — the calling
-# agent verifies before acting.
+# second opinion, plus one gated write path (delegate, and run --role executor).
+# The helpers never see the transcript: they get one prompt built from files
+# and arguments, answer once, and their text is material, not a verdict
+# (canon §11) — the calling agent verifies before acting.
 #
 # Usage:
 #   council.sh consult  (-q "<question>" | -f <file>) [--order agy,grok,codex]
@@ -1010,13 +1010,20 @@ with_timeout() {
   local secs="$1"; shift
   local cmd_pid killer_pid rc
   set -m 2>/dev/null || true
-  "$@" & cmd_pid=$!
-  ( sleep "$secs"; kill -0 "$cmd_pid" 2>/dev/null || exit 0
+  # Under set -m a non-interactive bash may lose the setpgid race with its own
+  # child and print «child setpgid (N to N): Operation not permitted» (macOS
+  # bash 3.2, QA 2.1.0 W1). The fork happens with stderr on /dev/null (the
+  # brace-group redirection), the command gets the real stderr back via fd 8.
+  # A caller that closed stderr (2>&-) would make 8>&2 fail and skip the whole
+  # group, so the helper never ran: put /dev/null on fd 2 first.
+  : >&2 2>/dev/null || exec 2>/dev/null
+  { "$@" 2>&8 8>&- & cmd_pid=$!; } 8>&2 2>/dev/null
+  { ( sleep "$secs"; kill -0 "$cmd_pid" 2>/dev/null || exit 0
     echo timeout > "$TMPS/timeout.$cmd_pid"
     # Kill the group only when the child really leads its own (set -m took);
     # otherwise -$cmd_pid would be THIS script's group, i.e. the whole council.
     t="$cmd_pid"; [ "$(ps -o pgid= -p "$cmd_pid" 2>/dev/null | tr -d ' ')" = "$cmd_pid" ] && t="-$cmd_pid"
-    kill -TERM -- "$t" 2>/dev/null; sleep 3; kill -KILL -- "$t" 2>/dev/null ) & killer_pid=$!
+    kill -TERM -- "$t" 2>/dev/null; sleep 3; kill -KILL -- "$t" 2>/dev/null ) & killer_pid=$!; } 2>/dev/null
   set +m 2>/dev/null || true
   { wait "$cmd_pid"; } 2>/dev/null; rc=$?
   { kill -KILL -- "-$killer_pid"; wait "$killer_pid"; } 2>/dev/null

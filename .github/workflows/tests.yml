@@ -7,8 +7,8 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    # 20, not 10: the four sub-harnesses added 2026-09-20 (council, limits,
-    # pf-run, plan-budget) add ~90 s on a Mac; the codex-review harness alone
+    # 20, not 10: the sub-harnesses added 2026-09-20 (council, pf-run)
+    # add ~90 s on a Mac; the codex-review harness alone
     # is ~4 min there, and the GitHub runner is slower.
     timeout-minutes: 20
     steps:

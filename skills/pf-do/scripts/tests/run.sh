@@ -49,6 +49,40 @@ else
 fi
 
 # ===========================================================================
+group "W1'': every fork under set -m runs with stderr on /dev/null (class guard, all pf-do scripts)"
+# ===========================================================================
+# Under set -m a non-interactive bash (macOS 3.2) may lose the setpgid race and
+# the CHILD prints «child setpgid (N to N): Operation not permitted» with the
+# stderr it inherited at fork. The cure is local to each fork site, which is
+# why fixing one file at a time kept missing the next one (QA 2.1.0 W1, W1′,
+# W1''). The race is rare (~3 % of loaded runs), so a behavioural test cannot
+# guard it; this static check does: inside every `set -m … set +m` region of
+# codex-review.sh, council.sh and tests/lib.sh, a background fork must be
+# `{ … & VAR=$!; } … 2>/dev/null`, and a line ending in a bare `&` is red.
+setm_scan() {
+  awk '
+    /^[[:space:]]*set -m/ { on = 1; regions++; next }
+    /^[[:space:]]*set \+m/ { on = 0; next }
+    on && /=\$!/ {
+      if ($0 ~ /=\$!;[[:space:]]*}.*2>\/dev\/null/) forks++
+      else { bad++; print FILENAME ":" FNR ": " $0 }
+      next
+    }
+    on {
+      line = $0; sub(/[[:space:]]*#.*$/, "", line)
+      if (line ~ /[^&>]&[[:space:]]*$/) { bad++; print FILENAME ":" FNR ": " $0 }
+    }
+    END { printf "regions=%d forks=%d bad=%d\n", regions, forks, bad }
+  ' "$@"
+}
+setm_out="$(setm_scan "$SUT" "$(dirname "$SUT")/council.sh" "$TESTS_DIR/lib.sh" 2>&1)"
+setm_sum="$(printf '%s\n' "$setm_out" | tail -1)"
+case "$setm_sum" in
+  "regions=5 forks=6 bad=0") pass "set -m forks guarded: $setm_sum" ;;
+  *) fail "a fork under set -m is not wrapped in { … & VAR=\$!; } 2>/dev/null (or the region count changed — recount and update)" "$setm_out" ;;
+esac
+
+# ===========================================================================
 group "F-04: consent matrix (--yes must never override an unverifiable or recorded-false consent)"
 # ===========================================================================
 expected_calls() {

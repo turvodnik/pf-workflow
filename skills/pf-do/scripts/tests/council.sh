@@ -196,6 +196,16 @@ run 10 "$MP" --wait "$REPO/nonexistent.pending"
 check "--wait on a missing marker -> FAIL, rc 1" "$( [ "$rc" = 1 ] && printf '%s' "$(first_line)" | grep -q '^FAIL: no such marker'; echo $? )" "out=$out"
 
 # ===========================================================================
+group "closed stderr (QA 2.1.0, N3): council.sh 2>&- still runs the helper"
+# ===========================================================================
+# with_timeout forks with stderr on /dev/null and hands the real one back via
+# fd 8; a caller with fd 2 closed made 8>&2 fail and the helper never started.
+scenario s_closed_stderr
+out="$( cd "$REPO" && run_with_timeout 10 env STUB_CTL="$CTL" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" PATH="$MP" \
+  "$BASH_BIN" -c 'exec 2>&-; exec "$0" "$@"' "$BASH_BIN" "$SUT" consult -q ping --order agy )"; rc=$?
+check "consult with stderr closed -> OK: agy, rc 0, the helper was called" "$( [ "$rc" = 0 ] && printf '%s' "$(first_line)" | grep -q '^OK: agy ' && [ "$(calls)" = agy ]; echo $? )" "rc=$rc out=$out calls=$(calls)"
+
+# ===========================================================================
 group "daily cap: 20 rows today -> FAIL before any helper runs"
 # ===========================================================================
 scenario cap

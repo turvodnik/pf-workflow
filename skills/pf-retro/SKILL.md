@@ -17,6 +17,7 @@ The paths below are the author's environment (`~/ai` — projects root, `_tools/
 2. Task packets: `blocked`, plus those hanging in `review`/`in_progress` longer than a week.
 3. Git: activity per project (`git log --since=...`), projects with no commits at all.
 4. Usage: which skills/plugins/agents were actually applied (per journals), which — not once in 2 periods.
+5. SOLUTIONS store (`_tools/SOLUTIONS.md`; pf-handoff users — `solutions_path` from `~/.config/pf-handoff/config.json`): rows `устарело` → archive; contradicting pairs without «доказательство» → a proposal; keep the file ≤ 200 lines.
 
 ## Analysis
 

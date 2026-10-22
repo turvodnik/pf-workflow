@@ -233,8 +233,8 @@ fi
 # ===========================================================================
 # Sub-harnesses added by the 2026-09-20 fix pass (SPEC-agent-limits, final
 # review 💭-9 / Consistency № 12): until then CI ran only the codex-review
-# harness above — council.sh, limits.sh, pf-run.sh and plan-budget.sh shipped
-# with their own suites never executed here. Same contract as the block
+# harness above — council.sh and pf-run.sh shipped with their own suites
+# never executed here. Same contract as the block
 # above: require_subharness_ran (rc 0/1 = a real run), then the per-case FAIL
 # labels («  - label» lines of the "Failed:" summary, lib.sh format) against
 # the allowlist. Each one's own summary is printed for the human reader.
@@ -591,14 +591,9 @@ group "No real network calls, no real codex CLI reachable in this suite"
 # child at $CR_TESTS/run.sh — a curl/wget added there would have escaped
 # this tripwire forever, even though README promises it "never touches the
 # network" for the exact command that runs that child (T-017 fix round,
-# 🟡 E). One more carve-out (T-134): tests/limits.sh puts fixtures/fake-curl
-# on the poll PATH as `curl` as a NEGATIVE control — the script under test
-# must never call it (its counter is asserted to stay 0). Lines that name
-# that double (`fake-curl`, its counter `ncurl` / `curl.calls`) are the
-# control, not a network call; a bare `curl https://…` matches none of
-# them and still trips the wire.
+# 🟡 E).
 CR_TESTS="$ROOT/skills/pf-do/scripts/tests"
-net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v "^$TESTS_DIR/run\.sh:" | grep -vE 'fake-curl|ncurl|curl\.calls' || true)
+net_hits=$(grep -rnE '\bcurl\b|\bwget\b' "$TESTS_DIR" "$CR_TESTS" --include='*.sh' --include='fake-codex' 2>/dev/null | grep -v "^$TESTS_DIR/run\.sh:" || true)
 if [ -z "$net_hits" ]; then
   pass "grep -rnE 'curl|wget' tests/ + skills/pf-do/scripts/tests/ (excluding run.sh itself) -> no matches"
 else

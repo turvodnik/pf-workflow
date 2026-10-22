@@ -495,13 +495,19 @@ if [ "$ASYNC" = 1 ] && [ "$IS_ASYNC" != 1 ]; then
   # not reach it — the same mechanism this script already uses for codex —
   # `trap '' HUP` in the child does nohup's actual job, and stdin/stdout/stderr
   # are fully redirected so nothing keeps the caller's pipe open.
+  # Under set -m a non-interactive bash may lose the setpgid race with its own
+  # child, and the CHILD prints «child setpgid (N to N): Operation not
+  # permitted» with the stderr it inherited at fork — before its own
+  # redirections apply (macOS bash 3.2, QA 2.1.0 W1''). So every fork under
+  # set -m in pf-do happens inside a brace group with stderr on /dev/null; the
+  # child's own 2>&1 below still sends its real stderr to the marker. A brace
+  # group is not a subshell: $! is still the detached bash.
   set -m 2>/dev/null || true
-  PF_CODEX_ASYNC=1 PF_CODEX_ASYNC_DONE_FILE="$MARKER.done" PF_CODEX_HEAD_PIN="$HEAD_PINNED" \
+  { PF_CODEX_ASYNC=1 PF_CODEX_ASYNC_DONE_FILE="$MARKER.done" PF_CODEX_HEAD_PIN="$HEAD_PINNED" \
   PF_CODEX_SELF_COPY="$SELF_SNAP" "${BASH:-bash}" -c '
     trap "" HUP
     exec "$@"' _ "${BASH:-bash}" "$SELF_SNAP" ${FWD[@]+"${FWD[@]}"} \
-    </dev/null >>"$MARKER" 2>&1 &
-  ASYNC_PID=$!
+    </dev/null >>"$MARKER" 2>&1 & ASYNC_PID=$!; } 2>/dev/null
   set +m 2>/dev/null || true
   disown "$ASYNC_PID" 2>/dev/null || true
   echo "PENDING: $MARKER"
@@ -833,9 +839,12 @@ START="$(date +%s)"
 # No subshell wrapper: $! must be Codex itself, otherwise the watchdog kills the
 # wrapper and leaves the real process running (orphaned, still burning quota).
 cd "$REPO_ROOT" || skip "cannot enter $REPO_ROOT"
+# The fork happens with stderr on /dev/null (brace group, not a subshell — $!
+# stays Codex): under set -m the child may lose the setpgid race and print
+# «child setpgid …» with the stderr it inherited, before its own 2>"$ERR"
+# applies (QA 2.1.0 W1''; same cure as the async launch above).
 set -m 2>/dev/null || true   # own process group for Codex → we can signal its whole tree
-codex "$@" </dev/null 2>"$ERR" >"$TMP" &
-CODEX_PID=$!
+{ codex "$@" </dev/null 2>"$ERR" >"$TMP" & CODEX_PID=$!; } 2>/dev/null
 set +m 2>/dev/null || true
 # Watchdog: Codex emits nothing until it finishes, so a hung run would block the
 # whole session. Kill it at the effort's budget and report a failure, never a
