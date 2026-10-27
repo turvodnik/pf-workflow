@@ -5,25 +5,27 @@
 # Why (QA 11.10, Ж-5): wait-guard.sh blocks only the registry of THIS
 # session — the `session_id:` line of an active HANDOFF or of
 # .agents/runtime/autopilot-run.md must match the id Claude Code passes to
-# its hooks (an 8-character prefix is enough). The agent itself never sees
-# that id; without this line it writes a placeholder and the guard silently
-# stays off. At session start (and after /clear, resume, compaction) this
-# hook prints one line into the agent's context:
+# its hooks — the FULL id, compared by exact equality (R02, 2.1.1: two ids
+# sharing their first 8 characters used to accept each other's registry; a
+# short form is for display only). The agent itself never sees that id;
+# without this line it writes a placeholder and the guard silently stays off.
+# At session start (and after /clear, resume, compaction) this hook prints
+# one line into the agent's context:
 #
-#   Сессия: <first 8 characters> — это значение поля session_id в HANDOFF/реестре
+#   Сессия: <full session_id> — это значение поля session_id в HANDOFF/реестре
 #
 # The same line is printed by pf-handoff's start hook (hooks/sessionstart.sh);
 # when that hook is registered in the same settings file and carries the
 # line, this one stays silent — no duplicate. Also silent: PF_COUNCIL_RUN=1
 # (a child CLI started by council.sh is not an orchestrator), no usable
-# session_id on stdin. stdin is read up to 64 KB. Never fails: exit 0.
+# session_id on stdin (8–128 characters of [A-Za-z0-9_-]). stdin is read up to 64 KB. Never fails: exit 0.
 # Registered by pf-workflow's install.sh like every hooks/*.sh (upsert/KEPT).
 set -u
 
 INPUT="$(head -c 65536 2>/dev/null || true)"
 [ "${PF_COUNCIL_RUN:-}" = 1 ] && exit 0
 
-sid="$(printf '%s' "$INPUT" | tr -d '\n' | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]\{8,\}\)".*/\1/p' | head -1)"
+sid="$(printf '%s' "$INPUT" | tr -d '\n' | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]\{8,128\}\)".*/\1/p' | head -1)"
 [ -n "$sid" ] || exit 0
 
 # pf-handoff's start hook registered in the settings file AND printing the
@@ -56,5 +58,5 @@ then
   exit 0
 fi
 
-printf 'Сессия: %s — это значение поля session_id в HANDOFF/реестре\n' "$(printf '%s' "$sid" | cut -c1-8)"
+printf 'Сессия: %s — это значение поля session_id в HANDOFF/реестре\n' "$sid"
 exit 0

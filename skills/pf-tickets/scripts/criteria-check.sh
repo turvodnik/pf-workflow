@@ -14,6 +14,7 @@
 #       cmd: grep -c "foo" path/file
 #       expect: 1
 #       expect_head: 0          # optional: what the cmd prints on HEAD today
+#       expect_head_rc: 2       # optional: the exit code the cmd returns on HEAD
 #       cwd: <repo dir>         # optional: absolute, or relative to --cwd
 #
 # Kinds: change | invariant | observation (canon, references/task-template.md).
@@ -29,8 +30,17 @@
 #   change without cmd                          -> NO-CMD WARN (old format, valid)
 #   unknown kind                                -> UNKNOWN-KIND WARN
 #   invariant/observation carrying a cmd        -> SKIP (...) — cmd present, not run
-#   cmd wrote to stderr                         -> STDERR WARN (first line; `ls`
-#                                                  on a missing file is legitimate)
+#   expect_head_rc present and rc != it         -> HEAD-MISMATCH FAIL
+#   cmd wrote to stderr                         -> STDERR WARN (first line)
+#   broken probe (R09, 2.1.1)                   -> PROBE-ERROR, exit 2 — never
+#     "OK (red on HEAD)": the cmd does not parse (`bash -n`), or a non-zero
+#     rc with "syntax error" (a nested shell), a Python SyntaxError /
+#     IndentationError, a grep regex error, or a missing / unreadable file
+#     ("No such file", "Permission denied", "cannot open") in stderr.
+#     A legitimate negative probe returns non-zero without such stderr
+#     (`grep -c x file` → 0, rc 1); one whose red state IS such an error (the
+#     work creates the file; the program under test reports a syntax error)
+#     declares `expect_head_rc: <rc>`.
 #   criteria section with bullets but no `- [ ]` -> NO-CHECKBOX WARN (old format)
 # The cmd runs under `bash -o pipefail -c`: a pipeline whose first link is not
 # found (`/typo/bin | wc -l`) is a run error (rc 127), not a "red on HEAD".
@@ -38,7 +48,8 @@
 # before `— change` does not win).
 # Summary line: `criteria-check: N checked, F fail, S skipped`.
 # Exit: 0 clean; 1 any FAIL; 2 usage error, section missing, or a cmd that
-# could not run (not found / not executable / timeout 60 s) — loud, never silent.
+# could not run (not found / not executable / timeout 60 s) or is a broken probe
+# (PROBE-ERROR) — loud, never silent.
 #
 # Dependencies: bash + python3 standard library only (public distribution).
 set -u
@@ -56,6 +67,18 @@ import subprocess
 import sys
 
 TIMEOUT = 60
+# A probe that is itself broken: shell, Python (SyntaxError/IndentationError —
+# NOT a Traceback/ModuleNotFoundError, which is a legitimate red before the
+# work) and grep regex errors (BSD, GNU, ugrep wording). Not "any rc 2": a
+# program under test rejecting a not-yet-existing flag exits 2 legitimately.
+SYNTAX_ERR_RE = re.compile(r"syntax error|unexpected (?:EOF|end of file)|bad substitution|unterminated quoted"
+                           r"|SyntaxError|IndentationError"
+                           r"|parentheses not balanced|brackets \(\[ ?\]\) not balanced|Unmatched [\[(]"
+                           r"|Invalid regular expression|mismatched \( \)"
+                           r"|repetition-operator operand invalid|invalid character (?:class )?range|invalid repetition count"
+                           r"|invalid repeat|empty \(sub\)expression|Invalid range end|Invalid preceding regular expression"
+                           r"|Invalid content of \\\{\\\}|Trailing backslash|Invalid back reference|Unmatched \)", re.IGNORECASE)
+MISSING_FILE_RE = re.compile(r"No such file or directory|Permission denied|cannot open|can't open|cannot access", re.IGNORECASE)
 CANON = {"change", "invariant", "observation"}
 SYNONYMS = {"behaviour": "change", "behavior": "change", "output": "change",
             "manual": "observation"}
@@ -63,7 +86,7 @@ KIND_RE = re.compile(r"(?:[—–]|\s-\s)\s*(change|invariant|observation|behavi
                      re.IGNORECASE)
 SECTION_RE = re.compile(r"^##\s+(Критерии приёмки|Acceptance criteria)\b", re.IGNORECASE)
 ITEM_RE = re.compile(r"^-\s+\[( |x|X)\]\s+(.*)$")
-FIELD_RE = re.compile(r"^\s+(cmd|expect|expect_head|cwd):\s?(.*)$")
+FIELD_RE = re.compile(r"^\s+(cmd|expect|expect_head|expect_head_rc|cwd):\s?(.*)$")
 
 
 def usage(msg=None):
@@ -149,14 +172,27 @@ def short(text, n=90):
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+def syntax_error(cmd, cwd):
+    """The first line of `bash -n` for a cmd that does not parse, else None."""
+    try:
+        p = subprocess.run(["bash", "-n", "-c", cmd], cwd=cwd, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"cannot check syntax: {e}"
+    if p.returncode == 0:
+        return None
+    err = p.stderr.decode("utf-8", "replace").strip()
+    return (err.splitlines() or [f"bash -n rc {p.returncode}"])[0]
+
+
 def run_cmd(cmd, cwd):
-    """Returns (stdout_trimmed, stderr_trimmed, error_message_or_None)."""
+    """Returns (stdout_trimmed, stderr_trimmed, rc, error_message_or_None)."""
     try:
         p = subprocess.Popen(["bash", "-o", "pipefail", "-c", cmd], cwd=cwd,
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, start_new_session=True)
     except OSError as e:
-        return None, None, f"cannot start: {e}"
+        return None, None, None, f"cannot start: {e}"
     try:
         out, err = p.communicate(timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -165,12 +201,12 @@ def run_cmd(cmd, cwd):
         except OSError:
             pass
         p.communicate()
-        return None, None, f"timeout after {TIMEOUT}s"
+        return None, None, None, f"timeout after {TIMEOUT}s"
     out = out.decode("utf-8", "replace").strip()
     err = err.decode("utf-8", "replace").strip()
     if p.returncode in (126, 127):
-        return None, err, f"cannot run (rc {p.returncode}): {err or cmd}"
-    return out, err, None
+        return None, err, p.returncode, f"cannot run (rc {p.returncode}): {err or cmd}"
+    return out, err, p.returncode, None
 
 
 def main():
@@ -221,9 +257,31 @@ def main():
             print(f"criteria-check: cwd not a directory for {label}: {cwd}", file=sys.stderr)
             run_error = True
             continue
-        out, stderr, err = run_cmd(f["cmd"], cwd)
+        bad = syntax_error(f["cmd"], cwd)
+        if bad is not None:
+            print(f"criteria-check: PROBE-ERROR {label}: the cmd does not parse: {bad}", file=sys.stderr)
+            run_error = True
+            continue
+        out, stderr, rc, err = run_cmd(f["cmd"], cwd)
         if err is not None:
             print(f"criteria-check: RUN-ERROR {label}: {err}", file=sys.stderr)
+            run_error = True
+            continue
+        want_rc = f.get("expect_head_rc", "").strip()
+        if want_rc and not re.fullmatch(r"\d+", want_rc):
+            print(f"criteria-check: PROBE-ERROR {label}: expect_head_rc is not a number: {want_rc!r}", file=sys.stderr)
+            run_error = True
+            continue
+        if rc != 0 and stderr and SYNTAX_ERR_RE.search(stderr) and want_rc != str(rc):
+            print(f"criteria-check: PROBE-ERROR {label}: syntax error inside the cmd (rc {rc}): "
+                  f"{stderr.splitlines()[0]} — fix the cmd, or declare `expect_head_rc: {rc}` if the "
+                  f"program under test reports that error ON PURPOSE", file=sys.stderr)
+            run_error = True
+            continue
+        if rc != 0 and stderr and MISSING_FILE_RE.search(stderr) and want_rc != str(rc):
+            print(f"criteria-check: PROBE-ERROR {label}: the cmd failed on a missing/unreadable file (rc {rc}): "
+                  f"{stderr.splitlines()[0]} — fix the cmd, or declare `expect_head_rc: {rc}` if "
+                  f"that failure IS the red state on HEAD", file=sys.stderr)
             run_error = True
             continue
         checked += 1
@@ -234,6 +292,8 @@ def main():
             verdicts.append(f"RED-BEFORE-WORK FAIL: {label} (cmd already gives expect={f['expect']!r} on HEAD)")
         if "expect_head" in f and out != f["expect_head"].strip():
             verdicts.append(f"HEAD-MISMATCH FAIL: {label}: expected {f['expect_head']!r}, got {out!r}")
+        if want_rc and str(rc) != want_rc:
+            verdicts.append(f"HEAD-MISMATCH FAIL: {label}: expected rc {want_rc}, got rc {rc}")
         if verdicts:
             fails += 1
             for v in verdicts:
@@ -243,7 +303,7 @@ def main():
 
     print(f"criteria-check: {checked} checked, {fails} fail, {skipped} skipped")
     if run_error:
-        print("criteria-check: one or more commands could not run (see stderr)", file=sys.stderr)
+        print("criteria-check: one or more commands could not run or are broken probes (see stderr)", file=sys.stderr)
         sys.exit(2)
     sys.exit(1 if fails else 0)
 

@@ -72,8 +72,10 @@ Re-run G3 on every packet born mid-execution.
    change criterion (`RED-BEFORE-WORK FAIL`) means the packet is not released —
    rewrite the criterion; `HEAD-MISMATCH FAIL` means `expect_head` was written
    by hand — take it from the command. `NO-CMD WARN` / `NO-CHECKBOX WARN` is the
-   old format, still valid; a `RUN-ERROR` (rc 2 — command not found, also as the
-   first link of a pipeline, or timeout) is a typo in the criterion, not a red; invariant / observation are skipped by design (they are proven by
+   old format, still valid; a `RUN-ERROR` / `PROBE-ERROR` (rc 2 — command not found, also as the
+   first link of a pipeline, timeout, a cmd that does not parse or fails on a
+   missing file) is a broken criterion, not a red — a missing file that IS the
+   red state is declared with `expect_head_rc:`; invariant / observation are skipped by design (they are proven by
    staging and by a reader, not by a green run — pf-do step 6).
 2. In SPEC.md, the «Декомпозиция» section: the packet list in order.
 3. Once G3 is clean — a digest for the human: a table (id, essence, depends on, executor), what can run in parallel, and the ready launch command for the first batch: new session → «выполни task-пакет T-00N по pf-do» — or with one command `/pf-auto`: the whole pipeline by subagents to the end (the pf-auto skill).

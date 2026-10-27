@@ -4,6 +4,19 @@
 
 Semver: breaking changes (task-packet frontmatter contract, skill behavior contracts, `.agents/` runtime layout) = major; new features = minor; fixes = patch.
 
+## [2.1.1] — 2026-10-23
+
+Fixes from an independent full review (not a diff review) of 2.1.0; the defects below were already in 2.0.0.
+
+### Fixed
+
+- **`session_id` is stored in full and compared exactly** (`hooks/pf-session-id.sh`, `hooks/wait-guard.sh`, `pf-auto` step 2, the registry template). Two sessions whose ids share the first 8 characters accepted each other's registry, because the hook printed 8 characters and the guard took any prefix as a match. The start line now prints the full id (8–128 characters), and "own" means exact equality. Compatibility: a registry written before 2.1.1 with an 8-character value is still guarded, unless another registry in the project carries an id with the same prefix (a full one or another short one) — an ambiguous prefix belongs to nobody. The guard looks for that conflict among active HANDOFF files and `autopilot-run.md` (pf-handoff's start hook — among HANDOFF files only). A 9+ character prefix is no longer a match. A lone legacy value still cannot tell apart two sessions that share its prefix — rewrite it with the full id.
+- **A timed-out wait no longer lets the turn end** (`hooks/wait-guard.sh`). The guard looked only at the last call (`TaskOutput(block=true)`, a Bash wait loop) and not at its result. Now a wait that came back with `retrieval_status` timeout / `status` running (read from the result's service fields, not from the job's output), or a failed Bash wait with `Command timed out after` / `FAIL: wait timeout`, blocks the stop once more. The deliberate stop stays open: mark the job in the registry with a status other than «запущен»; the one-nudge-per-turn limit (`stop_hook_active`) still prevents an endless wait.
+- **A broken acceptance probe is no longer "red on HEAD"** (`pf-tickets/scripts/criteria-check.sh`). `printf (` gave `STDERR WARN`, `OK (red on HEAD)` and rc 0. Now a command that does not parse (`bash -n`, a nested shell's "syntax error", a Python `SyntaxError`/`IndentationError`, a grep regex error recognised by the BSD/GNU/ugrep wording of its message — only the listed wordings, e.g. `*`, `[b-a]`, `a{2,1}`, an unbalanced bracket; not "any exit code 2", because a program under test may legitimately exit 2 on a flag it does not know yet; a probe error with a wording not on the list can still pass as `OK (red on HEAD)` — for such a probe declare `expect_head_rc:`), or fails with a missing/unreadable file in stderr, is a `PROBE-ERROR` with exit 2; a Python `Traceback`/`ModuleNotFoundError` stays a legitimate red. A legitimate negative probe (non-zero rc without such stderr, e.g. `grep -c` finding 0) is accepted as before; a red state that IS such an error (the work creates the file; the program under test reports a syntax error) is declared with the new optional field `expect_head_rc:`, which is also checked.
+- **`install.sh` fails when the hooks are not registered.** With a broken `~/.claude/settings.json` — or a hook skipped because it is not executable or declares no `# hook-event:` — the default install printed the error, then `Done` with rc 0 (`--sync` already failed on a broken file). Now both fail with rc 1 (the other hooks are still registered); the settings file stays unchanged, and the default install prints `INCOMPLETE` with the `--sync` command to re-run.
+- **`pf-do` step 3:** a HANDOFF checkpoint only for a standalone executor with no orchestrator; under an orchestrator the HANDOFF is the orchestrator's — the executor neither creates nor rewrites it (same rule as pf-handoff 2.1.1).
+- **`pf-auto` step 3:** BASE for the review diff is recorded BEFORE the executor starts (for a worktree — its start commit), so an executor's immediate first commit is inside `BASE..HEAD`.
+
 ## [2.1.0] — 2026-10-22
 
 ### Added

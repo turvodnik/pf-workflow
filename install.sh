@@ -59,7 +59,7 @@ wrap_hook() {
 }
 
 register_hooks() {
-  local hooks_dir="$HERE/hooks" h event name cmd specs=""
+  local hooks_dir="$HERE/hooks" h event name cmd specs="" skipped=0
   if ! command -v python3 >/dev/null 2>&1; then
     echo "install.sh: python3 not found — hooks NOT registered (skills are installed; re-run --sync once python3 is available)" >&2
     return 1
@@ -75,19 +75,25 @@ register_hooks() {
     name="$(basename "$h")"
     if [ ! -x "$h" ]; then
       echo "install.sh: hook $name is not executable — skipped (chmod +x and re-run --sync)" >&2
+      skipped=1   # R10: a hook that is not registered fails the install
       continue
     fi
     event="$(sed -n 's/^# hook-event: *\([A-Za-z]*\).*$/\1/p' "$h" | head -1)"
     if [ -z "$event" ]; then
       echo "install.sh: hook $name declares no '# hook-event: <Event>' line — skipped" >&2
+      skipped=1
       continue
     fi
     cmd="$(wrap_hook "$h")"
     specs="${specs}${event}"$'\x1f'"/${name}"$'\x1f'"${cmd}"$'\x1f'"${h}"$'\x1e'
   done
   if [ -z "$specs" ]; then
-    echo "install.sh: no hooks to register (hooks/*.sh missing or empty)"
-    return 0
+    if [ "$skipped" = 1 ]; then
+      echo "install.sh: no hook could be registered (all hooks/*.sh were skipped, reasons above)" >&2
+    else
+      echo "install.sh: no hooks to register (hooks/*.sh missing or empty)"
+    fi
+    return "$skipped"
   fi
   if [ ! -f "$SETTINGS_PATH" ]; then
     mkdir -p "$(dirname "$SETTINGS_PATH")"
@@ -231,6 +237,7 @@ PYEOF
   # KEPT lines stand on their own; the summary is the last line.
   printf '%s\n' "$out" | grep '^KEPT: ' || true
   echo "install.sh: hooks in $SETTINGS_PATH — $(printf '%s\n' "$out" | grep -v '^KEPT: ' | tail -1)"
+  return "$skipped"
 }
 
 if [ "$SYNC" = 1 ]; then
@@ -346,6 +353,12 @@ for f in "$HERE"/agents/*.md; do
   install_one "$f" "$HOME/.claude/agents/$(basename "$f")"
 done
 
-register_hooks || true   # skills are in place; a missing python3 is reported above
+# Hooks are a required step (R10, 2.1.1): a failed registration (broken
+# settings.json — left unchanged —, no python3) fails the install like --sync
+# does, instead of a "Done" over a half-installed tool.
+if ! register_hooks; then
+  echo "install.sh: INCOMPLETE (mode: $MODE) — skills and agents are installed, but the hooks are NOT registered (reason above); fix it and re-run: bash install.sh --sync" >&2
+  exit 1
+fi
 
 echo "Done (mode: $MODE). Don't forget the rules: docs/rules-sections.en.md (or .ru.md) → your AGENTS.md/CLAUDE.md."

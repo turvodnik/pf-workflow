@@ -501,6 +501,99 @@ write_transcript "$P/t.jsonl" nowait
 run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
 expect "32 running row on line $(grep -n 'T-999' "$P/.agents/runtime/handoff/2026-10-12-long.md" | cut -d: -f1) of a long own HANDOFF -> blocks" 2 "registry has running jobs (Z / T-999"
 
+# --- R02 (2.1.1): the full id, exact equality; legacy 8-char compatibility ---
+SID_A="01a164b4-0000-7000-8000-000000000001"; SID_B="01a164b4-ffff-7000-8000-000000000002"
+# 33. a 9+-character prefix is no longer "own" (only exact equality or the legacy 8)
+P="$(new_project p33)"; write_handoff "$P" "2026-10-23-run.md" active "fda3bf59-d602" yes
+write_transcript "$P/t.jsonl" nowait
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "33 a 13-char prefix of the id is not own (exact equality)" 0 "skipped: no own registry"
+# 34. two sessions share the first 8 characters: B's full-id registry makes the
+# legacy 8-char value ambiguous → A does not take it; B still blocks on its own.
+P="$(new_project p34)"; write_handoff "$P" "2026-10-23-legacy.md" active "01a164b4" yes
+write_handoff "$P" "2026-10-23-b.md" active "$SID_B" yes
+write_transcript "$P/t.jsonl" nowait
+run_hook < <(stdin_json "$SID_A" "$P/t.jsonl" "$P" false)
+expect "34 session A: the legacy 8-char registry is ambiguous next to B's full id -> not own" 0 "skipped: no own registry"
+run_hook < <(stdin_json "$SID_B" "$P/t.jsonl" "$P" false)
+expect "34a session B: its full-id registry is own -> blocks" 2 "registry has running jobs"
+# 35. a full id of another session is never own, even with the same first 8
+P="$(new_project p35)"; write_handoff "$P" "2026-10-23-b.md" active "$SID_B" yes
+write_transcript "$P/t.jsonl" nowait
+run_hook < <(stdin_json "$SID_A" "$P/t.jsonl" "$P" false)
+expect "35 B's full id, session A with the same 8 chars -> not own" 0 "skipped: no own registry"
+# 36. compatibility: a legacy 8-char autopilot-run.md alone is still guarded.
+P="$(new_project p36)"
+printf '# Реестр автопилота\nsession_id: fda3bf59\n\n| Задание | Тикеты | Статус |\n|---|---|---|\n| C | T-003 | запущен |\n' > "$P/.agents/runtime/autopilot-run.md"
+write_transcript "$P/t.jsonl" nowait
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "36 legacy 8-char autopilot-run.md alone -> still own, blocks" 2 "C / T-003"
+# 36a. two legacy registries with the same 8 chars: the prefix is ambiguous
+# (the shared contract: no other registry with that prefix) -> neither is own.
+write_handoff "$P" "2026-10-20-old.md" active "fda3bf59" yes
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "36a two legacy registries with one prefix -> ambiguous, not own" 0 "skipped: no own registry"
+
+# --- R08 (2.1.1): the outcome of the last blocking wait counts ----------------
+# wait_transcript <file> <tool name> <input json> <tool_result content json> [is_error] [extra record json]
+wait_transcript() {
+  {
+    printf '{"type":"user","isSidechain":false,"message":{"role":"user","content":"Запусти волну"}}\n'
+    printf '{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_w1","name":"%s","input":%s}]}}\n' "$2" "$3"
+    printf '{"type":"user","isSidechain":false%s,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_w1","content":%s%s}]}}\n' "${6:+,$6}" "$4" "${5:+,\"is_error\":true}"
+    printf '{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"Задание ещё идёт."}]}}\n'
+  } > "$1"
+}
+TO_RUNNING='"<retrieval_status>timeout</retrieval_status>\n\n<task_id>b1</task_id>\n\n<task_type>local_agent</task_type>\n\n<status>running</status>"'
+TO_DONE='"<retrieval_status>success</retrieval_status>\n\n<task_id>b1</task_id>\n\n<status>completed</status>\n\n<output>ok</output>"'
+P="$(new_project p37)"; write_handoff "$P" "2026-10-23-run.md" active "$SID" yes
+# 37. TaskOutput(block) timed out, the job still running → BLOCK (was: allowed)
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true,"timeout":600000}' "$TO_RUNNING"
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "37 TaskOutput timed out, job running -> blocks" 2 "last blocking wait timed out"
+printf '%s' "$ERR" | grep -q "record a deliberate stop in the registry" && pass "37a the reason names the deliberate-stop path" || fail "37a no deliberate-stop path in: $ERR"
+# 37b. the same timeout as a list of text blocks → BLOCK
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true}' '[{"type":"text","text":"<retrieval_status>timeout</retrieval_status> <status>running</status>"}]'
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "37b timeout result as content blocks -> blocks" 2 "last blocking wait timed out"
+# 38. TaskOutput(block) came back finished → allowed
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true}' "$TO_DONE"
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "38 TaskOutput finished -> allowed" 0 "made a blocking wait"
+# 38a. finished TaskOutput whose job OUTPUT mentions <status>running</status> → allowed
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true}' '"<retrieval_status>success</retrieval_status>\n\n<status>completed</status>\n\n<output>log: <status>running</status> Command timed out after 1m</output>"'
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "38a finished TaskOutput, timeout-looking words only inside <output> -> allowed" 0 "made a blocking wait"
+# 38b. the structured toolUseResult decides when present (timeout + running → BLOCK)
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true}' '"(no text)"' "" '"toolUseResult":{"retrieval_status":"timeout","task":{"task_id":"b1","status":"running"}}'
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "38b structured toolUseResult timeout -> blocks" 2 "last blocking wait timed out"
+# 38c. a finished Bash wait (no is_error) that merely prints the phrase → allowed
+wait_transcript "$P/t.jsonl" Bash '{"command":"until [ -f done.flag ]; do sleep 20; done; cat done.flag"}' '"Command timed out after 2m (quoted from an old log)"'
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "38c finished Bash wait printing the phrase, rc 0 -> allowed" 0 "made a blocking wait"
+# 39. foreground Bash until-loop killed by the tool timeout → BLOCK
+wait_transcript "$P/t.jsonl" Bash '{"command":"until [ -f done.flag ]; do sleep 20; done","timeout":600000}' '"Exit code 143\nCommand timed out after 10m 0s"' err
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "39 Bash until-loop timed out -> blocks" 2 "last blocking wait timed out"
+# 40. council.sh --wait reported its own wait timeout → BLOCK
+wait_transcript "$P/t.jsonl" Bash '{"command":"bash council.sh --wait /tmp/m --timeout 500"}' '"Exit code 1\nFAIL: wait timeout (500 s)"' err
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "40 --wait timed out -> blocks" 2 "last blocking wait timed out"
+# 41. Bash until-loop finished → allowed
+wait_transcript "$P/t.jsonl" Bash '{"command":"until [ -f done.flag ]; do sleep 20; done; cat done.flag"}' '"DONE"'
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "41 Bash until-loop finished -> allowed" 0 "made a blocking wait"
+# 42. deliberate stop: after the timeout the registry row was re-marked → allowed
+wait_transcript "$P/t.jsonl" TaskOutput '{"task_id":"b1","block":true}' "$TO_RUNNING"
+write_handoff "$P" "2026-10-23-run.md" active "$SID" no
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" false)
+expect "42 timeout + registry re-marked (deliberate stop) -> allowed" 0 "no running jobs"
+# 43. bounded: the continuation after the nudge passes (no endless wait)
+write_handoff "$P" "2026-10-23-run.md" active "$SID" yes
+run_hook < <(stdin_json "$SID" "$P/t.jsonl" "$P" true)
+expect "43 timeout but stop_hook_active -> passes (one nudge per turn)" 0 "stop_hook_active"
+
 echo
 echo "wait-guard tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

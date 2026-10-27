@@ -460,6 +460,79 @@ else
 fi
 
 # ===========================================================================
+group "install.sh fails when hook registration does not complete (R10, 2.1.1): default and --sync agree"
+# ===========================================================================
+# A broken settings.json: registration refuses and leaves it unchanged; the
+# install must not report "Done" with rc 0 (it did: `register_hooks || true`).
+# Temporary HOME and settings file only. Output is matched with here-strings,
+# not `printf | grep -q` (that pipe races under pipefail — QA4 2.1.0).
+if command -v python3 >/dev/null 2>&1; then
+  r10_root="$(mktempdir)"; mkdir -p "$r10_root/home"
+  r10_s="$r10_root/settings.json"; printf '{"hooks": {"Stop": [' > "$r10_s"
+  r10_sum0=$(cksum < "$r10_s")
+  r10_o1=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$ROOT/install.sh" 2>&1); r10_r1=$?
+  r10_sum1=$(cksum < "$r10_s")
+  if [ "$r10_r1" != 0 ] && [ "$r10_sum1" = "$r10_sum0" ] && ! grep -q '^Done' <<<"$r10_o1" \
+     && grep -q 'INCOMPLETE' <<<"$r10_o1" && grep -q 'not valid JSON' <<<"$r10_o1"; then
+    pass "default install over a broken settings.json -> rc $r10_r1, file unchanged, INCOMPLETE, no Done"
+  else
+    fail "default install over a broken settings.json (rc=$r10_r1, unchanged=$([ "$r10_sum1" = "$r10_sum0" ] && echo yes || echo no))" "$r10_o1"
+  fi
+  r10_o2=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$ROOT/install.sh" --sync 2>&1); r10_r2=$?
+  if [ "$r10_r2" != 0 ] && [ "$r10_r2" = "$r10_r1" ] && [ "$(cksum < "$r10_s")" = "$r10_sum0" ] && grep -q 'not valid JSON' <<<"$r10_o2"; then
+    pass "--sync over the same file -> the same rc $r10_r2, file unchanged"
+  else
+    fail "--sync over a broken settings.json disagrees with the default mode (sync rc=$r10_r2, default rc=$r10_r1)" "$r10_o2"
+  fi
+  # control: the same install over a valid file succeeds
+  printf '{}\n' > "$r10_s"
+  r10_o3=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$ROOT/install.sh" --update 2>&1); r10_r3=$?
+  if [ "$r10_r3" = 0 ] && grep -q '^Done' <<<"$r10_o3" && grep -q 'wait-guard' "$r10_s"; then
+    pass "control: a valid settings.json -> rc 0, Done, hooks registered"
+  else
+    fail "control: install over a valid settings.json (rc=$r10_r3)" "$r10_o3"
+  fi
+  # QA 27.10 (2.1.1, yellow-2): a hook skipped because it is not executable is
+  # a hook that is NOT registered — the install fails like a broken file does.
+  r10_c="$r10_root/clone"; mkdir -p "$r10_c"; cp -R "$ROOT/." "$r10_c/"; rm -rf "$r10_c/.git"
+  chmod -x "$r10_c/hooks/wait-guard.sh"
+  printf '{}\n' > "$r10_s"
+  r10_o4=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$r10_c/install.sh" 2>&1); r10_r4=$?
+  if [ "$r10_r4" != 0 ] && ! grep -q '^Done' <<<"$r10_o4" && grep -q 'INCOMPLETE' <<<"$r10_o4" && grep -q 'not executable' <<<"$r10_o4"; then
+    pass "default install with a non-executable wait-guard.sh -> rc $r10_r4, INCOMPLETE, no Done"
+  else
+    fail "non-executable hook: default install (rc=$r10_r4)" "$r10_o4"
+  fi
+  printf '{}\n' > "$r10_s"
+  r10_o5=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$r10_c/install.sh" --sync 2>&1); r10_r5=$?
+  if [ "$r10_r5" != 0 ] && grep -q 'not executable' <<<"$r10_o5"; then
+    pass "--sync with a non-executable wait-guard.sh -> rc $r10_r5"
+  else
+    fail "non-executable hook: --sync (rc=$r10_r5)" "$r10_o5"
+  fi
+  chmod -x "$r10_c/hooks/pf-session-id.sh"; printf '{}\n' > "$r10_s"
+  r10_o6=$(HOME="$r10_root/home" CLAUDE_SETTINGS_PATH="$r10_s" "$BASH_BIN" "$r10_c/install.sh" --sync 2>&1); r10_r6=$?
+  if [ "$r10_r6" != 0 ] && grep -q 'no hook could be registered' <<<"$r10_o6" && ! grep -q 'missing or empty' <<<"$r10_o6"; then
+    pass "--sync with every hook non-executable -> rc $r10_r6, the true reason (not 'missing or empty')"
+  else
+    fail "all hooks non-executable (rc=$r10_r6)" "$r10_o6"
+  fi
+else
+  echo "SKIP  python3 not available — install.sh needs it to register hooks"
+fi
+
+# ===========================================================================
+group "criteria-check.sh broken probe vs legitimate red (R09, 2.1.1): skills/pf-tickets/scripts/tests/criteria-check.sh"
+# ===========================================================================
+cc_out=$("$BASH_BIN" "$ROOT/skills/pf-tickets/scripts/tests/criteria-check.sh" 2>&1); cc_rc=$?
+cc_tail=$(tail -1 <<<"$cc_out")
+if [ "$cc_rc" = 0 ] && grep -q 'passed, 0 failed' <<<"$cc_tail"; then
+  pass "criteria-check: $cc_tail"
+else
+  fail "criteria-check suite red (rc=$cc_rc): $cc_tail" "$cc_out"
+fi
+
+# ===========================================================================
 group "private-words stop-list (T-191, QA К-1): no author's project names in this tree"
 # ===========================================================================
 # The list lives OUTSIDE the distribution (${PF_PRIVATE_WORDS:-<canon>/

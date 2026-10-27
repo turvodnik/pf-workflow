@@ -16,7 +16,7 @@ pass() { PASS=$((PASS + 1)); echo "PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL: $1" >&2; }
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pf-session-id-tests.XXXXXX")"
 trap 'rm -rf "$ROOT"' EXIT
-LINE='Сессия: fda3bf59 — это значение поля session_id в HANDOFF/реестре'
+LINE='Сессия: fda3bf59-d602-451d-a7f2-a255d4dfdab1 — это значение поля session_id в HANDOFF/реестре'
 IN='{"session_id":"fda3bf59-d602-451d-a7f2-a255d4dfdab1","hook_event_name":"SessionStart","source":"startup","cwd":"/tmp"}'
 
 run() {  # run <label> <expected stdout> <stdin> [VAR=value ...]
@@ -26,12 +26,14 @@ run() {  # run <label> <expected stdout> <stdin> [VAR=value ...]
 }
 
 S=""
-run "1 startup -> the line with the first 8 chars of session_id" "$LINE" "$IN"
+run "1 startup -> the line with the FULL session_id (R02, 2.1.1)" "$LINE" "$IN"
 run "2 PF_COUNCIL_RUN=1 (a council.sh child) -> silent" "" "$IN" PF_COUNCIL_RUN=1
 run "3 no session_id -> silent" "" '{"source":"startup"}'
 run "4 garbage / empty stdin -> silent, rc 0" "" 'garbage{'
 run "5 a short id (< 8 chars) -> silent" "" '{"session_id":"abc"}'
 run "6 an id with shell metacharacters -> silent (never echoed)" "" '{"session_id":"$(touch x)aaaa"}'
+LONG="$(printf 'a%.0s' $(seq 1 129))"
+run "6b an id longer than 128 chars -> silent (not echoed whole)" "" "{\"session_id\":\"$LONG\"}"
 
 # pf-handoff's start hook in the same settings file
 PH="$ROOT/Mike's pf-handoff/hooks"; mkdir -p "$PH"

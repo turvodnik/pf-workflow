@@ -31,8 +31,12 @@
 # stdin: `.agents/runtime/handoff/*.md` with `status: active` in the
 # frontmatter, or `.agents/runtime/autopilot-run.md` with a `session_id:`
 # line in its head. A foreign active HANDOFF (another session's autopilot
-# left in the same project) is ignored on purpose. HANDOFF files often keep
-# an 8-char prefix of the session id — a prefix of length >= 8 matches.
+# left in the same project) is ignored on purpose. The id is stored in full
+# and "own" is exact equality (R02, 2.1.1: two ids sharing their first 8
+# characters used to accept each other's registry). A legacy 8-character
+# value (written before 2.1.1) is own only when this session's id starts
+# with it AND no other registry here carries an id with the same prefix (a
+# full one or another legacy one) — an ambiguous prefix belongs to nobody.
 # Neighbouring Stop hooks (Orca, the Codex plugin's stop-review-gate, …):
 # Claude Code runs EVERY registered Stop hook in the order they stand in the
 # hooks settings file, and each one decides on its own — a block from any of
@@ -68,6 +72,13 @@
 # of `TaskOutput` with `block: true`, or of `Bash` WITHOUT run_in_background
 # whose command contains `until `/`while ` or `--wait` — "waited for A, then
 # edited files, then prose" while B still runs is the stall, not a wait.
+# Its OUTCOME counts too (R08, 2.1.1): a wait that came back timed out
+# (TaskOutput `retrieval_status` timeout / not_ready or `status` running in
+# the service fields, not in the job's `<output>`; a Bash call that failed
+# with "Command timed out after" or a `--wait` "FAIL: wait timeout" line)
+# proves the job is still running — the turn is blocked once more. The deliberate stop stays
+# open: record it in the registry (a status other than «запущен»), and the
+# next Stop passes; `stop_hook_active` still bounds it to one nudge per turn.
 #
 # Registered by pf-workflow's install.sh (`bash install.sh --sync`); stdin is
 # Claude Code's hook JSON: session_id, transcript_path, stop_hook_active, cwd.
@@ -153,12 +164,19 @@ def frontmatter_lines(lines):
         out.append(line)
     return []
 
-def id_matches(file_id, session_id):
+LEGACY_LEN = 8  # the short form written before 2.1.1
+
+def id_matches(file_id, session_id, other_ids=()):
+    """Exact equality of the full id. A legacy 8-character value is own only
+    when session_id starts with it and no OTHER registry's id starts with the
+    same prefix — a full id or another legacy value (R02: ambiguity → not own)."""
     if not file_id or not session_id:
         return False
     if file_id == session_id:
         return True
-    return len(file_id) >= 8 and session_id.startswith(file_id)
+    if len(file_id) != LEGACY_LEN or not session_id.startswith(file_id):
+        return False
+    return not any(o and o.startswith(file_id) for o in other_ids)
 
 def find_agents_dir(cwd):
     """`.agents/runtime` in cwd or its ancestors (the orchestrator usually
@@ -246,9 +264,38 @@ def is_blocking_wait(name, inp):
         return re.search(r'(?:^|\s)--wait(?:[\s=]|$)', cmd) is not None
     return False
 
+TASK_TIMED_OUT = re.compile(r"<retrieval_status>\s*(?:timeout|not_ready)\s*<|<status>\s*running\s*<")
+BASH_TIMED_OUT = re.compile(r"^(?:Command timed out after|FAIL: wait timeout)", re.MULTILINE)
+
+def result_text(content):
+    """The text of a tool_result's content (a string or a list of blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in content)
+    return ""
+
+def wait_timed_out(name, block, record):
+    """Did this wait come back unfinished? TaskOutput: the structured result
+    (`toolUseResult`) when the record has it, else the service fields of the
+    text BEFORE `<output>` — the job's own output may say anything. Bash: only
+    a failed call (`is_error`) whose output has a line starting with the
+    harness timeout or a `--wait` timeout."""
+    text = result_text(block.get("content"))
+    if name == "TaskOutput":
+        tur = record.get("toolUseResult")
+        if isinstance(tur, dict) and "retrieval_status" in tur:
+            task = tur.get("task") if isinstance(tur.get("task"), dict) else {}
+            return tur.get("retrieval_status") in ("timeout", "not_ready") or task.get("status") == "running"
+        return TASK_TIMED_OUT.search(text.split("<output>", 1)[0]) is not None
+    return block.get("is_error") is True and BASH_TIMED_OUT.search(text) is not None
+
 def turn_has_blocking_wait(transcript_path):
-    """True when the LAST tool call of the LAST turn is a blocking wait
-    (see is_blocking_wait).
+    """"wait" when the LAST tool call of the LAST turn is a blocking wait
+    (see is_blocking_wait) that came back finished; "timeout" when that wait
+    came back timed out with the job still running (R08); "" otherwise.
+    A wait whose result is not in the transcript counts as finished — "cannot
+    check" never turns into "block".
 
     "Last tool call", not "any call this turn": a turn that waited for job A,
     then edited the registry / wrote files and ended in prose while job B is
@@ -259,7 +306,7 @@ def turn_has_blocking_wait(transcript_path):
     record carrying tool_result blocks is inside a turn. Sidechain records
     (subagent transcripts inlined) are ignored.
     """
-    waited = False
+    waited, last_id, last_name, timed_out = False, None, None, False
     with open(transcript_path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             if '"type"' not in line:
@@ -276,18 +323,24 @@ def turn_has_blocking_wait(transcript_path):
             msg = d.get("message") or {}
             content = msg.get("content") if isinstance(msg, dict) else None
             if t == "user":
-                if isinstance(content, list) and any(
-                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-                ):
-                    continue  # tool result — still the same turn
-                waited = False  # a new turn begins here
+                results = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"] \
+                    if isinstance(content, list) else []
+                if results:
+                    for b in results:  # tool result — still the same turn
+                        if waited and last_id and b.get("tool_use_id") == last_id:
+                            timed_out = wait_timed_out(last_name, b, d)
+                    continue
+                waited, timed_out = False, False  # a new turn begins here
             elif t == "assistant" and isinstance(content, list):
                 for b in content:
                     if not isinstance(b, dict) or b.get("type") != "tool_use":
                         continue
                     # the LAST call decides: a later non-wait call resets it
                     waited = is_blocking_wait(b.get("name"), b.get("input") or {})
-    return waited
+                    last_id, last_name, timed_out = b.get("id"), b.get("name"), False
+    if not waited:
+        return ""
+    return "timeout" if timed_out else "wait"
 
 def main():
     raw = os.environ.get("WAIT_GUARD_INPUT", "")
@@ -307,20 +360,19 @@ def main():
     if not runtime:
         ok("no .agents/runtime under %s" % cwd)
 
-    own = []
+    regs = []  # (path, session_id) of every registry: active HANDOFFs + autopilot-run.md
     for path in sorted(glob.glob(os.path.join(runtime, "handoff", "*.md"))):
         fm = frontmatter_lines(read_head(path))
         if not fm:
             continue  # no frontmatter — not a registry we understand
         if (head_field(fm, "status") or "") != "active":
             continue
-        if id_matches(head_field(fm, "session_id"), session_id):
-            own.append(path)
+        regs.append((path, head_field(fm, "session_id")))
     autopilot = os.path.join(runtime, "autopilot-run.md")
     if os.path.isfile(autopilot):
-        head = read_head(autopilot)
-        if id_matches(head_field(head, "session_id"), session_id):
-            own.append(autopilot)
+        regs.append((autopilot, head_field(read_head(autopilot), "session_id")))
+    own = [p for k, (p, i) in enumerate(regs)
+           if id_matches(i, session_id, [o for j, (_, o) in enumerate(regs) if j != k])]
     if not own:
         ok("skipped: no own registry for session %s" % session_id[:8])
 
@@ -333,8 +385,16 @@ def main():
     transcript = str(data.get("transcript_path") or "")
     if not transcript or not os.path.isfile(transcript):
         skip("transcript_path missing or not a file")
-    if turn_has_blocking_wait(transcript):
+    waited = turn_has_blocking_wait(transcript)
+    if waited == "wait":
         ok("running jobs exist, but this turn made a blocking wait")
+    if waited == "timeout":
+        sys.stderr.write(
+            "wait-guard: registry has running jobs (%s) and the last blocking wait timed out with the job"
+            " still running - re-issue the wait as the last tool call, or record a deliberate stop in the"
+            " registry (a status other than «запущен»)\n" % "; ".join(running)
+        )
+        sys.exit(BLOCK)
 
     sys.stderr.write(
         "wait-guard: registry has running jobs (%s) and this turn did not end on a blocking wait"
